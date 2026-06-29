@@ -1,0 +1,91 @@
+{
+  "name": "lite-ide",
+  "version": "1.0.0",
+  "description": "Lightweight IDE with Liquid Glass UI",
+  "author": "Harshal",
+  "main": "main.js",
+
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "dist": "node build.js",
+    "postinstall": "electron-builder install-app-deps"
+  },
+
+  "build": {
+    "appId": "com.liteid.app",
+    "productName": "LiteIDE",
+
+    "directories": {
+      "output": "dist",
+      "buildResources": "assets"
+    },
+
+    "asar": true,
+
+    "asarUnpack": [
+      "node_modules/node-pty/**/*",
+      "node_modules/monaco-editor/**/*",
+      "node_modules/xterm/**/*",
+      "node_modules/xterm-addon-fit/**/*"
+    ],
+
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/**/*",
+      "package.json",
+      "node_modules/**/*",
+      "!dist/**",
+      "!**/*.map"
+    ],
+
+    "npmRebuild": false,
+    "buildDependenciesFromSource": false,
+
+    "win": {
+      "target": [
+        "nsis",
+        "msi",
+        "portable"
+      ]
+    },
+
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "darkModeSupport": true,
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+
+    "linux": {
+      "category": "Development",
+      "target": [
+        "AppImage",
+        "deb"
+      ]
+    }
+  },
+
+  "dependencies": {
+    "monaco-editor": "^0.45.0",
+    "node-pty": "^1.1.0",
+    "xterm": "^5.3.0",
+    "xterm-addon-fit": "^0.8.0"
+  },
+
+  "devDependencies": {
+    "electron": "^42.5.0",
+    "electron-builder": "^26.15.3"
+  },
+
+  "allowScripts": {
+    "electron@42.5.0": true,
+    "node-pty@1.1.0": true,
+    "electron-winstaller@5.4.0": true,
+    "nslog@3.2.0": true,
+    "node-gyp@12.4.0": true
+  }
+}
