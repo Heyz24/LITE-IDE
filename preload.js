@@ -21,25 +21,56 @@ contextBridge.exposeInMainWorld('api', {
   // Run
   runCode:    (f, l)   => ipcRenderer.invoke('code:run', f, l),
   stopCode:   ()        => ipcRenderer.invoke('code:stop'),
+  processInput: data    => ipcRenderer.send('process:input', data),
   onStdout:   cb        => ipcRenderer.on('process:stdout', (_, d) => cb(d)),
   onStderr:   cb        => ipcRenderer.on('process:stderr', (_, d) => cb(d)),
   onExit:     cb        => ipcRenderer.on('process:exit',   (_, c) => cb(c)),
   onRunError: cb        => ipcRenderer.on('process:error',  (_, e) => cb(e)),
 
-  // Shell
-  getShells:    ()      => ipcRenderer.invoke('shell:getAvailable'),
-  spawnShell:   cmd     => ipcRenderer.invoke('shell:spawn', cmd),
-  processInput: data    => ipcRenderer.send('process:input', data),
-  shellInput:   data    => ipcRenderer.send('shell:input', data),
-  shellCd:      dir     => ipcRenderer.send('shell:cd', dir),
-  resizePty:    (c, r)  => ipcRenderer.send('shell:resize', c, r),
-  killShell:    ()      => ipcRenderer.send('shell:kill'),
-  onShellOutput: cb     => ipcRenderer.on('shell:output', (_, d) => cb(d)),
-  onShellExit:   cb     => ipcRenderer.on('shell:exit',   ()      => cb()),
-  onShellError:  cb     => ipcRenderer.on('shell:error',  (_, e)  => cb(e)),
+  // Terminal (multi-session)
+  getShells:    ()             => ipcRenderer.invoke('shell:getAvailable'),
+  termCreate:   (id, cmd)      => ipcRenderer.invoke('term:create', id, cmd),
+  termInput:    (id, data)     => ipcRenderer.send('term:input', id, data),
+  termCd:       (id, dir)      => ipcRenderer.send('term:cd', id, dir),
+  termResize:   (id, c, r)     => ipcRenderer.send('term:resize', id, c, r),
+  termClose:    (id)           => ipcRenderer.send('term:close', id),
+  onTermOutput: cb             => ipcRenderer.on('term:output', (_, d) => cb(d)),
+  onTermExit:   cb             => ipcRenderer.on('term:exit',   (_, d) => cb(d)),
+  onTermError:  cb             => ipcRenderer.on('term:error',  (_, d) => cb(d)),
+
+  // Project search & replace
+  searchProject: (q, opts)              => ipcRenderer.invoke('search:project', q, opts),
+  replaceAll:    (q, r, opts, files)    => ipcRenderer.invoke('search:replaceAll', q, r, opts, files),
+
+  // Git
+  gitIsRepo: ()          => ipcRenderer.invoke('git:isRepo'),
+  gitStatus: ()          => ipcRenderer.invoke('git:status'),
+  gitDiff:   relPath     => ipcRenderer.invoke('git:diff', relPath),
 
   // Misc
   openExternal: url     => ipcRenderer.send('open:external', url),
+  onOpenPath:   cb      => ipcRenderer.on('app:openPath', (_, p) => cb(p)),
   getPlatform:  ()      => ipcRenderer.invoke('app:platform'),
   getHomedir:   ()      => ipcRenderer.invoke('app:homedir'),
+
+  // ── AI Agent ──
+  ai: {
+    getConfig:        ()                      => ipcRenderer.invoke('ai:getConfig'),
+    saveConfig:       (cfg)                   => ipcRenderer.invoke('ai:saveConfig', cfg),
+    listOllamaModels: ()                      => ipcRenderer.invoke('ai:listOllamaModels'),
+    clearKey:         (provider)              => ipcRenderer.invoke('ai:clearKey', provider),
+    chatOnce:         (payload)               => ipcRenderer.invoke('ai:chatOnce', payload),
+  },
+  agent: {
+    setProjectRoot: root            => ipcRenderer.invoke('agent:setProjectRoot', root),
+    readFile:       relPath         => ipcRenderer.invoke('agent:readFile', relPath),
+    listDir:        relPath         => ipcRenderer.invoke('agent:listDir', relPath),
+    writeFile:      (relPath, c)    => ipcRenderer.invoke('agent:writeFile', relPath, c),
+    deleteFile:     relPath         => ipcRenderer.invoke('agent:deleteFile', relPath),
+    runCommand:     cmd             => ipcRenderer.invoke('agent:runCommand', cmd),
+    ragSearch:      (q, topK)       => ipcRenderer.invoke('agent:ragSearch', q, topK),
+    respondApproval:(id, approved)  => ipcRenderer.send('agent:approvalResponse', { id, approved }),
+    onApprovalRequest: cb           => ipcRenderer.on('agent:approvalRequest', (_, req) => cb(req)),
+    onCommandOutput:   cb           => ipcRenderer.on('agent:commandOutput', (_, d) => cb(d)),
+  },
 });

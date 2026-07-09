@@ -9,7 +9,8 @@
     "start": "electron .",
     "dev": "electron . --dev",
     "dist": "node build.js",
-    "postinstall": "electron-builder install-app-deps"
+    "postinstall": "electron-builder install-app-deps",
+    "test": "node --test test/wiring.test.js test/backend.test.js test/ai-providers.test.js"
   },
 
   "build": {
@@ -43,30 +44,16 @@
     "npmRebuild": false,
     "buildDependenciesFromSource": false,
 
-    "win": {
-      "target": [
-        "nsis",
-        "msi",
-        "portable"
-      ]
-    },
-
+    "win": { "target": ["nsis", "msi", "portable"] },
+    "fileAssociations": [
+      { "ext": ["py","js","jsx","ts","tsx","json","html","htm","css","md","go","rs","java","c","cpp","h","hpp","rb","php","txt","yml","yaml","sh","xml","sql"], "name": "Code File", "description": "Source file", "role": "Editor" }
+    ],
     "mac": {
       "category": "public.app-category.developer-tools",
       "darkModeSupport": true,
-      "target": [
-        "dmg",
-        "zip"
-      ]
+      "target": ["dmg", "zip"]
     },
-
-    "linux": {
-      "category": "Development",
-      "target": [
-        "AppImage",
-        "deb"
-      ]
-    }
+    "linux": { "category": "Development", "target": ["AppImage", "deb"] }
   },
 
   "dependencies": {

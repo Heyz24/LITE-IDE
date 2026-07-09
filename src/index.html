@@ -277,6 +277,74 @@ html, body {
   overflow:hidden;
 }
 
+#sidebar-tabs {
+  display:flex; gap:2px; padding:6px 8px 0; flex-shrink:0;
+  border-bottom:1px solid rgba(255,255,255,.04);
+}
+.sbt {
+  width:28px; height:24px; border-radius:6px 6px 0 0;
+  background:transparent; border:none; color:var(--t3);
+  cursor:pointer; display:flex; align-items:center; justify-content:center;
+  transition: background .15s, color .15s;
+}
+.sbt:hover { color:var(--t2); }
+.sbt.active { color:var(--t1); background:rgba(255,255,255,.06); }
+
+.sb-panel { display:none; flex-direction:column; flex:1; min-height:0; }
+.sb-panel.show { display:flex; }
+
+/* Search & Replace panel */
+.sp-input {
+  width:100%; margin-bottom:6px; background:var(--glass-hi); border:1px solid var(--glass-b);
+  border-radius:var(--r-sm); color:var(--t1); font-size:12px; padding:6px 9px; outline:none;
+}
+.sp-input:focus { border-color:var(--blue); }
+.sp-toggles { display:flex; gap:4px; margin-bottom:8px; }
+.sp-tg {
+  flex:1; background:var(--glass-hi); border:1px solid var(--glass-b); border-radius:var(--r-xs);
+  color:var(--t3); font-size:10.5px; padding:4px 0; cursor:pointer; font-family:inherit;
+}
+.sp-tg.on { background:rgba(0,122,255,.25); color:var(--blue); border-color:rgba(0,122,255,.4); }
+.sp-actions { display:flex; gap:6px; }
+.sp-actions .ai-save-btn { flex:1; text-align:center; }
+#sp-summary { font-size:10.5px; color:var(--t3); margin-top:6px; }
+#search-results { flex:1; overflow-y:auto; padding:4px; }
+.sr-file { font-size:10.5px; color:var(--t3); padding:5px 8px 2px; font-weight:600; }
+.sr-line {
+  display:flex; gap:6px; padding:2.5px 10px; font-size:11.5px; color:var(--t2);
+  cursor:pointer; border-radius:5px; font-family:'JetBrains Mono',monospace; white-space:nowrap; overflow:hidden;
+}
+.sr-line:hover { background:rgba(255,255,255,.055); }
+.sr-line .sr-ln { color:var(--t3); flex-shrink:0; }
+.sr-line .sr-text { overflow:hidden; text-overflow:ellipsis; }
+
+/* Git status badges in the file tree */
+.ti-git { margin-left:auto; font-size:9.5px; font-weight:700; flex-shrink:0; padding:0 3px; border-radius:3px; }
+.ti-git.M { color:var(--orange); }
+.ti-git.A, .ti-git.AD { color:var(--green); }
+.ti-git.D { color:var(--red); }
+.ti-git.U, .ti-git.QQ { color:#5ac8fa; }
+.ti-git.R { color:var(--purple); }
+
+/* Diff modal */
+#diff-overlay {
+  display:none; position:fixed; inset:0; z-index:100;
+  background:rgba(0,0,0,0.45); align-items:center; justify-content:center;
+}
+#diff-overlay.show { display:flex; }
+#diff-card {
+  width:86vw; height:80vh; border-radius:16px; display:flex; flex-direction:column;
+  background:rgba(16,16,28,0.85); backdrop-filter:blur(32px) saturate(200%);
+  -webkit-backdrop-filter:blur(32px) saturate(200%);
+  border:1px solid var(--glass-b); border-top-color:var(--glass-b-top);
+  box-shadow:0 20px 60px rgba(0,0,0,0.5); overflow:hidden;
+}
+#diff-card-head {
+  display:flex; align-items:center; justify-content:space-between; padding:10px 16px;
+  border-bottom:1px solid var(--glass-b); font-size:13px; color:var(--t1); flex-shrink:0;
+}
+#diff-host { flex:1; overflow:hidden; }
+
 .sb-head {
   padding: 10px 10px 8px;
   border-bottom: 1px solid rgba(255,255,255,.04);
@@ -364,6 +432,8 @@ html, body {
   border-bottom:1px solid var(--glass-b);
   padding:0 8px; gap:1px;
   min-height:36px; overflow-x:auto; flex-shrink:0;
+  mask-image: linear-gradient(to right, transparent 0, black 10px, black calc(100% - 10px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, transparent 0, black 10px, black calc(100% - 10px), transparent 100%);
 }
 #tabs-bar::-webkit-scrollbar { height:2px; }
 
@@ -394,6 +464,32 @@ html, body {
 #monaco-host {
   flex:1; overflow:hidden;
 }
+
+/* Split editor (pane B) */
+#editor-panes { flex:1; display:flex; overflow:hidden; min-height:0; }
+#pane-a-wrap { flex:1; display:flex; flex-direction:column; min-width:0; }
+#pane-a-wrap #monaco-host { flex:1; }
+#pane-b-wrap {
+  display:none; flex:1; flex-direction:column; min-width:0;
+  border-left:1px solid var(--glass-b);
+}
+#pane-b-wrap.show { display:flex; }
+#pane-b-header {
+  display:flex; align-items:center; gap:8px; padding:6px 10px;
+  border-bottom:1px solid var(--glass-b); background:rgba(8,8,18,.6); flex-shrink:0;
+}
+#pane-b-select {
+  flex:1; background:var(--glass-hi); border:1px solid var(--glass-b); border-radius:var(--r-sm);
+  color:var(--t1); font-size:11.5px; padding:4px 8px; outline:none;
+}
+#monaco-host-b { flex:1; overflow:hidden; }
+#split-editor-btn {
+  display:flex; align-items:center; padding:0 12px; flex-shrink:0;
+  color:var(--t3); background:transparent; border:none; border-left:1px solid var(--glass-b);
+  cursor:pointer; transition:background .15s, color .15s;
+}
+#split-editor-btn:hover { background:var(--glass-hi); color:var(--t1); }
+#split-editor-btn.active { color:var(--blue); }
 
 /* Empty / welcome screen */
 #welcome {
@@ -447,30 +543,63 @@ html, body {
   padding:7px 12px 5px; border-bottom:1px solid rgba(255,255,255,.04);
   flex-shrink:0; margin-top:5px;
 }
-.term-tabs { display:flex; gap:2px; }
+.term-tabs {
+  display:flex; gap:2px; overflow-x:auto; flex:1; min-width:0; scrollbar-width:thin;
+  mask-image: linear-gradient(to right, transparent 0, black 8px, black calc(100% - 8px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, transparent 0, black 8px, black calc(100% - 8px), transparent 100%);
+}
 .tt {
-  padding:2px 12px; border-radius:6px; font-size:12px;
+  padding:2px 8px 2px 12px; border-radius:6px; font-size:12px; display:flex; align-items:center; gap:5px;
   cursor:pointer; color:var(--t3); transition:all .15s; border:none; background:transparent;
-  font-family:inherit;
+  font-family:inherit; flex-shrink:0; max-width:160px;
 }
+.tt span:first-child { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .tt.active { background:rgba(255,255,255,.08); color:var(--t1); }
-
-.term-right { display:flex; align-items:center; gap:6px; margin-left:auto; }
-
-#shellSel {
-  background:rgba(255,255,255,.06); border:1px solid var(--glass-b);
-  border-radius:7px; color:var(--t2); font-family:inherit; font-size:11px;
-  padding:2px 8px; outline:none; cursor:pointer;
+.tt .tt-x {
+  width:14px; height:14px; border-radius:50%; border:none; background:transparent;
+  color:var(--t3); display:flex; align-items:center; justify-content:center; font-size:9px;
+  opacity:0; transition:all .15s; flex-shrink:0; font-family:inherit;
 }
-#shellSel option { background:#12121e; }
+.tt:hover .tt-x { opacity:1; }
+.tt .tt-x:hover { background:rgba(255,69,58,.35); color:var(--red); }
+
+.term-right { display:flex; align-items:center; gap:6px; margin-left:8px; flex-shrink:0; }
+#term-split-btn.active { color:var(--blue); background:rgba(0,122,255,.15); border-radius:6px; }
 
 #term-body {
   flex:1; overflow:hidden; padding:6px 4px 4px 8px;
-  position:relative;
+  position:relative; display:flex; gap:6px;
+}
+.term-pane { flex:1; min-width:0; overflow:hidden; position:relative; display:none; }
+.term-pane.show { display:block; }
+#term-pane-right.show { border-left:1px solid var(--glass-b); padding-left:6px; }
+.term-pane-select {
+  position:absolute; top:2px; right:6px; z-index:5;
+  background:rgba(20,20,34,.85); border:1px solid var(--glass-b); border-radius:6px;
+  color:var(--t2); font-size:10px; padding:2px 6px; outline:none; cursor:pointer;
 }
 .xterm { height:100%; }
 .xterm-viewport { background:transparent !important; border-radius:0 !important; }
 .xterm-screen canvas { border-radius:0 !important; }
+
+/* Shell picker modal (reuses approval card look) */
+#shell-picker-overlay {
+  display:none; position:fixed; inset:0; z-index:100;
+  background:rgba(0,0,0,0.45); align-items:center; justify-content:center;
+}
+#shell-picker-overlay.show { display:flex; }
+#shell-picker-card {
+  width:320px; border-radius:16px; background:rgba(20,18,30,0.8);
+  backdrop-filter:blur(32px) saturate(200%); -webkit-backdrop-filter:blur(32px) saturate(200%);
+  border:1px solid var(--glass-b); border-top-color:var(--glass-b-top);
+  box-shadow:0 20px 60px rgba(0,0,0,0.5); padding:18px;
+}
+.spk-item {
+  display:flex; align-items:center; gap:8px; padding:8px 10px; margin-bottom:4px;
+  border-radius:8px; cursor:pointer; font-size:12.5px; color:var(--t2);
+  background:var(--glass-hi); border:1px solid var(--glass-b); transition:.15s;
+}
+.spk-item:hover { background:var(--glass-hi2); color:var(--t1); border-color:var(--blue); }
 
 /* ═══════════════════════════════════════════
    SCROLLBARS
@@ -523,6 +652,121 @@ html, body {
 .ctx-item:hover { background:rgba(255,255,255,.07); color:var(--t1); }
 .ctx-item.danger:hover { background:rgba(255,69,58,.15); color:var(--red); }
 .ctx-sep { height:1px; background:var(--glass-b); margin:3px 0; }
+
+/* ═══════════════════════════════════════════
+   AI AGENT TAB TRIGGER + PANEL
+═══════════════════════════════════════════ */
+#tabs-row { display:flex; align-items:stretch; }
+#tabs-bar { flex:1; min-width:0; }
+#ai-tab-trigger {
+  display:flex; align-items:center; gap:6px; flex-shrink:0;
+  padding:0 14px; font-size:12px; color:var(--t2); cursor:pointer;
+  border-left:1px solid var(--glass-b); background:transparent;
+  transition:background .15s, color .15s;
+}
+#ai-tab-trigger:hover { background:var(--glass-hi); color:var(--purple); }
+.tab.agent-tab .tab-icon { filter: drop-shadow(0 0 4px rgba(191,90,242,.6)); }
+.tab.agent-tab.active { border-color:var(--purple); }
+
+#ai-panel {
+  display:none; flex-direction:column; height:100%;
+  background:rgba(10,10,20,0.35);
+}
+#ai-panel.show { display:flex; }
+
+#ai-settings-bar {
+  display:flex; flex-direction:column; gap:6px; padding:8px 12px;
+  border-bottom:1px solid var(--glass-b);
+  background:rgba(255,255,255,0.02);
+}
+.ai-settings-row {
+  display:flex; align-items:center; gap:8px;
+  overflow-x:auto; scrollbar-width:thin; min-width:0;
+}
+#ai-settings-bar select, #ai-settings-bar input[type="password"], #ai-settings-bar input[type="text"] {
+  background:var(--glass-hi); border:1px solid var(--glass-b); border-radius:var(--r-sm);
+  color:var(--t1); font-size:12px; padding:5px 9px; outline:none; font-family:inherit;
+  flex-shrink:0; min-width:0;
+}
+#ai-model-input { width:180px; }
+#ai-key-input { width:150px; }
+#ai-ollama-url { width:170px; }
+#ai-settings-bar select:focus, #ai-settings-bar input:focus { border-color:var(--purple); }
+#ai-settings-bar label { font-size:11px; color:var(--t3); }
+.ai-autoapprove-label { display:flex; align-items:center; gap:5px; flex-shrink:0; white-space:nowrap; }
+.ai-close-btn { margin-left:auto; flex-shrink:0; }
+.ai-key-input { width:150px; }
+.ai-save-btn { flex-shrink:0;
+  background:var(--glass-hi); border:1px solid var(--glass-b); border-radius:var(--r-sm);
+  color:var(--t2); font-size:11px; padding:5px 10px; cursor:pointer; transition:.15s;
+}
+.ai-save-btn:hover { background:var(--purple); color:#fff; border-color:var(--purple); }
+.ai-status-dot { width:6px; height:6px; border-radius:50%; background:var(--t3); flex-shrink:0; }
+.ai-status-dot.on { background:var(--green); box-shadow:0 0 6px var(--green); }
+
+#ai-chat-log {
+  flex:1; overflow-y:auto; padding:16px 18px; display:flex; flex-direction:column; gap:12px;
+}
+.ai-msg { max-width:88%; padding:10px 13px; border-radius:var(--r); font-size:12.5px; line-height:1.5; white-space:pre-wrap; word-break:break-word; }
+.ai-msg.user { align-self:flex-end; background:linear-gradient(135deg, var(--blue), #4a9fff); color:#fff; border-bottom-right-radius:4px; }
+.ai-msg.assistant {
+  align-self:flex-start; background:var(--glass-hi); border:1px solid var(--glass-b);
+  border-top-color:var(--glass-b-top); backdrop-filter:blur(20px); color:var(--t1); border-bottom-left-radius:4px;
+}
+.ai-msg.system { align-self:center; color:var(--t3); font-size:11px; background:none; padding:2px 8px; }
+.ai-tool-card {
+  align-self:flex-start; max-width:92%; font-size:11.5px; font-family:'JetBrains Mono',monospace;
+  background:rgba(191,90,242,0.08); border:1px solid rgba(191,90,242,0.25); border-radius:var(--r-sm);
+  padding:8px 10px; color:var(--t2);
+}
+.ai-tool-card .th { color:var(--purple); font-weight:600; margin-bottom:3px; display:flex; align-items:center; gap:5px; }
+.ai-tool-card pre { white-space:pre-wrap; word-break:break-word; margin-top:4px; max-height:160px; overflow-y:auto; color:var(--t2); }
+.ai-tool-card.denied { border-color:rgba(255,69,58,.35); background:rgba(255,69,58,.06); }
+.ai-tool-card.denied .th { color:var(--red); }
+
+#ai-input-row {
+  display:flex; gap:8px; padding:10px 12px; border-top:1px solid var(--glass-b);
+  background:rgba(255,255,255,0.02);
+}
+#ai-input {
+  flex:1; resize:none; background:var(--glass-hi); border:1px solid var(--glass-b);
+  border-radius:var(--r-sm); color:var(--t1); font-family:inherit; font-size:12.5px;
+  padding:9px 12px; outline:none; max-height:120px;
+}
+#ai-input:focus { border-color:var(--purple); }
+#ai-send-btn {
+  background:linear-gradient(135deg, var(--purple), #8b3fd1); border:none; border-radius:var(--r-sm);
+  color:#fff; padding:0 18px; cursor:pointer; font-size:12px; font-weight:500; flex-shrink:0;
+}
+#ai-send-btn:disabled { opacity:.4; cursor:default; }
+#ai-thinking { align-self:flex-start; font-size:11px; color:var(--t3); font-style:italic; padding:2px 4px; }
+
+/* Approval modal */
+#approval-overlay {
+  display:none; position:fixed; inset:0; z-index:100;
+  background:rgba(0,0,0,0.45); align-items:center; justify-content:center;
+}
+#approval-overlay.show { display:flex; }
+#approval-card {
+  width:420px; max-width:90vw; border-radius:16px;
+  background:rgba(20,18,30,0.75); backdrop-filter:blur(32px) saturate(200%);
+  -webkit-backdrop-filter:blur(32px) saturate(200%);
+  border:1px solid var(--glass-b); border-top-color:var(--glass-b-top);
+  box-shadow:0 20px 60px rgba(0,0,0,0.5); padding:20px;
+}
+#approval-card .ac-title { display:flex; align-items:center; gap:8px; font-size:14px; font-weight:600; color:var(--orange); margin-bottom:6px; }
+#approval-card .ac-detail { font-size:12px; color:var(--t2); margin-bottom:10px; line-height:1.5; }
+#approval-card pre {
+  background:rgba(0,0,0,0.3); border:1px solid var(--glass-b); border-radius:8px;
+  padding:8px 10px; font-size:11px; color:var(--t2); max-height:140px; overflow-y:auto; margin-bottom:14px;
+  font-family:'JetBrains Mono',monospace; white-space:pre-wrap; word-break:break-word;
+}
+#approval-card .ac-btns { display:flex; gap:10px; justify-content:flex-end; }
+.ac-btn { padding:8px 16px; border-radius:var(--r-sm); font-size:12.5px; cursor:pointer; border:1px solid var(--glass-b); }
+.ac-btn.deny { background:var(--glass-hi); color:var(--t2); }
+.ac-btn.deny:hover { background:rgba(255,69,58,.18); color:var(--red); }
+.ac-btn.allow { background:var(--green); color:#06180c; font-weight:600; border-color:var(--green); }
+.ac-btn.allow:hover { filter:brightness(1.1); }
 </style>
 </head>
 <body>
@@ -582,39 +826,91 @@ html, body {
 
   <!-- ══ SIDEBAR ══ -->
   <div id="sidebar">
-    <div class="sb-head">
-      <div class="sb-row">
-        <span class="sb-label">Explorer</span>
-        <button class="ib" onclick="newFile()" title="New File">
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-            <path d="M6 1v10M1 6h10"/>
-          </svg>
-        </button>
-        <button class="ib" onclick="refreshTree()" title="Refresh">
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-            <path d="M10 5A4.5 4.5 0 106 10.5"/>
-            <path d="M10 2v3H7"/>
-          </svg>
-        </button>
-      </div>
-      <button class="open-btn" onclick="openFolder()">
-        <svg width="14" height="12" viewBox="0 0 14 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
-          <path d="M1 2.5h4l1.5 1.5H13v7H1V2.5z"/>
-        </svg>
-        Open Folder
+    <div id="sidebar-tabs">
+      <button class="sbt active" data-panel="explorer" onclick="switchSidebarPanel('explorer')" title="Explorer">
+        <svg width="14" height="12" viewBox="0 0 14 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M1 2.5h4l1.5 1.5H13v7H1V2.5z"/></svg>
+      </button>
+      <button class="sbt" data-panel="search" onclick="switchSidebarPanel('search')" title="Search (Ctrl+Shift+F)">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="7" cy="7" r="5"/><path d="M11 11l4 4"/></svg>
       </button>
     </div>
-    <div id="fileTree">
-      <div class="sb-empty">
-        <span class="e-icon">📂</span>
-        Open a folder to see<br>your files here
+
+    <div id="explorer-panel" class="sb-panel show">
+      <div class="sb-head">
+        <div class="sb-row">
+          <span class="sb-label">Explorer</span>
+          <button class="ib" onclick="newFile()" title="New File">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+              <path d="M6 1v10M1 6h10"/>
+            </svg>
+          </button>
+          <button class="ib" onclick="refreshTree()" title="Refresh">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+              <path d="M10 5A4.5 4.5 0 106 10.5"/>
+              <path d="M10 2v3H7"/>
+            </svg>
+          </button>
+        </div>
+        <button class="open-btn" onclick="openFolder()">
+          <svg width="14" height="12" viewBox="0 0 14 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+            <path d="M1 2.5h4l1.5 1.5H13v7H1V2.5z"/>
+          </svg>
+          Open Folder
+        </button>
       </div>
+      <div id="fileTree">
+        <div class="sb-empty">
+          <span class="e-icon">📂</span>
+          Open a folder to see<br>your files here
+        </div>
+      </div>
+    </div>
+
+    <div id="search-panel" class="sb-panel">
+      <div class="sb-head">
+        <div class="sb-row"><span class="sb-label">Search & Replace</span></div>
+        <input id="search-query" class="sp-input" placeholder="Search in project…" autocomplete="off" spellcheck="false">
+        <input id="search-replacement" class="sp-input" placeholder="Replace with…" autocomplete="off" spellcheck="false">
+        <div class="sp-toggles">
+          <button class="sp-tg" id="sp-case" title="Case sensitive" onclick="toggleSearchOpt('case')">Aa</button>
+          <button class="sp-tg" id="sp-word" title="Whole word" onclick="toggleSearchOpt('word')">ab</button>
+          <button class="sp-tg" id="sp-regex" title="Regex" onclick="toggleSearchOpt('regex')">.*</button>
+        </div>
+        <div class="sp-actions">
+          <button class="ai-save-btn" onclick="runProjectSearch()">Search</button>
+          <button class="ai-save-btn" onclick="runProjectReplaceAll()">Replace All</button>
+        </div>
+        <div id="sp-summary"></div>
+      </div>
+      <div id="search-results"></div>
+    </div>
+  </div>
+
+  <!-- ══ DIFF MODAL ══ -->
+  <div id="diff-overlay">
+    <div id="diff-card">
+      <div id="diff-card-head">
+        <span id="diff-card-title">Diff</span>
+        <button class="ai-save-btn" onclick="closeDiffModal()">Close</button>
+      </div>
+      <div id="diff-host"></div>
     </div>
   </div>
 
   <!-- ══ EDITOR ══ -->
   <div id="editor-area">
-    <div id="tabs-bar"></div>
+    <div id="tabs-row">
+      <div id="tabs-bar"></div>
+      <button id="split-editor-btn" onclick="toggleEditorSplit()" title="Split editor">
+        <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="1" y="1" width="12" height="12" rx="1.5"/><path d="M7 1v12"/></svg>
+      </button>
+      <button id="ai-tab-trigger" onclick="openAgentTab()" title="AI Agent">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M8 1l1.6 4.2L14 7l-4.4 1.8L8 13l-1.6-4.2L2 7l4.4-1.8L8 1z"/>
+        </svg>
+        <span>AI Agent</span>
+      </button>
+    </div>
     <div id="welcome">
       <div class="w-logo">⌨️</div>
       <div class="w-title">LiteIDE</div>
@@ -625,34 +921,103 @@ html, body {
         <div class="w-sc"><kbd id="sc-run">⌘↵</kbd> Run code</div>
       </div>
     </div>
-    <div id="monaco-host" style="display:none;"></div>
+    <div id="editor-panes" style="display:none;">
+      <div id="pane-a-wrap"><div id="monaco-host"></div></div>
+      <div id="pane-b-wrap">
+        <div id="pane-b-header">
+          <select id="pane-b-select" onchange="onPaneBSelectChange(this.value)"></select>
+          <button class="ai-save-btn" onclick="closeEditorSplit()">✕</button>
+        </div>
+        <div id="monaco-host-b"></div>
+      </div>
+    </div>
+
+    <!-- ══ AI AGENT PANEL ══ -->
+    <div id="ai-panel">
+      <div id="ai-settings-bar">
+        <div class="ai-settings-row">
+          <span class="ai-status-dot" id="ai-status-dot"></span>
+          <select id="ai-provider-sel" onchange="onProviderChange()">
+            <option value="anthropic">Anthropic (Claude)</option>
+            <option value="openai">OpenAI</option>
+            <option value="gemini">Google Gemini</option>
+            <option value="ollama">Ollama (offline)</option>
+          </select>
+          <input id="ai-model-input" class="ai-key-input" type="text" list="ai-model-list" placeholder="model name (type any)" autocomplete="off">
+          <datalist id="ai-model-list"></datalist>
+          <span id="ai-key-wrap"><input id="ai-key-input" class="ai-key-input" type="password" placeholder="API key" autocomplete="off"></span>
+          <span id="ai-ollama-url-wrap" style="display:none">
+            <input id="ai-ollama-url" type="text" placeholder="http://localhost:11434">
+          </span>
+          <button class="ai-save-btn" onclick="saveAiSettings()">Save</button>
+          <button class="ai-save-btn" onclick="clearAiKey()" title="Permanently delete the stored key for this provider">Clear Key</button>
+        </div>
+        <div class="ai-settings-row">
+          <button class="ai-save-btn" onclick="testAiConnection()" title="Send a tiny test message to confirm the key + model work">Test</button>
+          <button class="ai-save-btn" onclick="runAgentSelfTest()" title="Exercise read/write/run tools end-to-end">Self-Test Tools</button>
+          <label class="ai-autoapprove-label">
+            <input type="checkbox" id="ai-autoapprove" style="accent-color:var(--purple)"> Auto-approve non-critical
+          </label>
+          <button class="ai-save-btn ai-close-btn" onclick="closeAgentTab()" title="Close AI Agent tab">✕</button>
+        </div>
+      </div>
+      <div id="ai-chat-log">
+        <div class="ai-msg system">Ask me to explore, edit, or run something in your project. I can read every file for context, but I'll ask before touching critical files (.env, package.json, git) or running risky commands.</div>
+      </div>
+      <div id="ai-input-row">
+        <textarea id="ai-input" rows="1" placeholder="Ask the agent… (Enter to send, Shift+Enter for new line)"></textarea>
+        <button id="ai-send-btn" onclick="sendAgentMessage()">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ APPROVAL MODAL ══ -->
+  <div id="approval-overlay">
+    <div id="approval-card">
+      <div class="ac-title">⚠️ <span id="ac-title-text">Approval needed</span></div>
+      <div class="ac-detail" id="ac-detail-text"></div>
+      <pre id="ac-preview" style="display:none"></pre>
+      <div class="ac-btns">
+        <button class="ac-btn deny" onclick="respondApproval(false)">Deny</button>
+        <button class="ac-btn allow" onclick="respondApproval(true)">Allow</button>
+      </div>
+    </div>
   </div>
 
   <!-- ══ TERMINAL ══ -->
   <div id="term-area">
     <div id="term-resize"></div>
     <div id="term-header">
-      <div class="term-tabs">
-        <button class="tt active" data-tab="shell"  onclick="switchTab('shell')">Shell</button>
-        <button class="tt"        data-tab="output" onclick="switchTab('output')">Output</button>
-      </div>
+      <div class="term-tabs" id="term-tabs"></div>
       <div class="term-right">
-        <select id="shellSel" onchange="changeShell(this.value)">
-          <option value="">Detecting...</option>
-        </select>
-        <button class="ib" onclick="term.clear()" title="Clear">
+        <button class="ib" id="term-split-btn" onclick="toggleTermSplit()" title="Split terminal">
+          <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="1" y="1" width="12" height="12" rx="1.5"/><path d="M7 1v12"/></svg>
+        </button>
+        <button class="ib" onclick="clearFocusedTerm()" title="Clear">
           <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
             <path d="M2 2l7 7M9 2l-7 7"/>
           </svg>
         </button>
-        <button class="ib" onclick="respawnShell()" title="New Shell">
+        <button class="ib" onclick="openShellPicker()" title="New Shell Session">
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
             <path d="M6 1v10M1 6h10"/>
           </svg>
         </button>
       </div>
     </div>
-    <div id="term-body"></div>
+    <div id="term-body">
+      <div class="term-pane" id="term-pane-left"></div>
+      <div class="term-pane" id="term-pane-right"></div>
+    </div>
+  </div>
+
+  <!-- ══ NEW SHELL PICKER ══ -->
+  <div id="shell-picker-overlay">
+    <div id="shell-picker-card">
+      <div class="ac-title">🖥️ <span>New shell session</span></div>
+      <div id="shell-picker-list"></div>
+      <div class="ac-btns"><button class="ac-btn deny" onclick="closeShellPicker()">Cancel</button></div>
+    </div>
   </div>
 
 </div>
@@ -668,15 +1033,12 @@ html, body {
 //  STATE
 // ═══════════════════════════════════════════
 let editor = null;
-let fitAddon = null;
-let term = null;
 let platform = 'linux';
 let currentFolder = null;
 let currentLang = 'Python';
 let langInstalled = true;
 let installUrl = null;
 let isRunning = false;
-let activeTermTab = 'shell';
 
 // Multi-tab state
 const tabs = [];       // [{path, name, model, unsaved}]
@@ -738,14 +1100,28 @@ async function init() {
   }
 
   initMonaco();
-  initXterm();
+  initTerminalSystem();
   setupTerminalResize();
-  loadShells();
   initLangStatuses();
   checkLang('Python');
+  initGitPolling();
 
   // window maximize state
   api.onMaximized(v => document.getElementById('app').classList.toggle('maximized', v));
+
+  // Fired when LiteIDE was launched (or focused) via "Open with" on a file.
+  api.onOpenPath(async (filePath) => {
+    const parentDir = filePath.replace(/[\\/][^\\/]*$/, '');
+    if (parentDir && parentDir !== currentFolder) {
+      currentFolder = parentDir;
+      if (window.api?.agent) api.agent.setProjectRoot(parentDir);
+      await refreshTree();
+      cdShellTo(parentDir);
+      refreshGitStatus();
+    }
+    const name = filePath.split(/[\\/]/).pop();
+    await openFile(filePath, name);
+  });
 }
 
 // ─── Monaco ───────────────────────────────
@@ -828,69 +1204,60 @@ function initMonaco() {
   });
 }
 
-// ─── xterm ────────────────────────────────
-function initXterm() {
-  fitAddon = new FitAddon.FitAddon();
+// ─── Multi-session Terminals (xterm.js instances, one per session, real system-shell auto-detect) ──
+// Every terminal (each shell session, plus the fixed "Output" pseudo-session) gets
+// its own xterm.js instance + DOM container. Panes (left/right) just reparent
+// whichever container they should currently display — nothing is destroyed when
+// you switch tabs or toggle split view, so background shells keep running/buffering.
+const terminals = new Map(); // id -> {id, kind:'shell'|'output', name, term, fitAddon, container, closable, shellCmd, hasPty, line:{buf,cursor,history,histIdx,saved}}
+let shellSessionCounter = 0;
+let leftTermId = null;
+let rightTermId = null;
+let termSplit = false;
+let focusedTermId = null;
 
-  term = new Terminal({
+function makeXtermInstance() {
+  const fitAddon = new FitAddon.FitAddon();
+  const term = new Terminal({
     theme: {
-      background:    'transparent',
-      foreground:    '#e0e0f0',
-      cursor:        '#007AFF',
-      cursorAccent:  '#001133',
+      background: 'transparent', foreground: '#e0e0f0', cursor: '#007AFF', cursorAccent: '#001133',
       selectionBackground: 'rgba(0,122,255,0.28)',
-      black:   '#1a1a2e', brightBlack:   '#2a2a4e',
-      red:     '#FF453A', brightRed:     '#ff6055',
-      green:   '#30D158', brightGreen:   '#40e168',
-      yellow:  '#FFD60A', brightYellow:  '#ffe833',
-      blue:    '#007AFF', brightBlue:    '#4a90ff',
-      magenta: '#BF5AF2', brightMagenta: '#d070ff',
-      cyan:    '#5AC8FA', brightCyan:    '#7adaff',
-      white:   '#e0e0f0', brightWhite:   '#ffffff',
+      black:'#1a1a2e', brightBlack:'#2a2a4e', red:'#FF453A', brightRed:'#ff6055',
+      green:'#30D158', brightGreen:'#40e168', yellow:'#FFD60A', brightYellow:'#ffe833',
+      blue:'#007AFF', brightBlue:'#4a90ff', magenta:'#BF5AF2', brightMagenta:'#d070ff',
+      cyan:'#5AC8FA', brightCyan:'#7adaff', white:'#e0e0f0', brightWhite:'#ffffff',
     },
     fontFamily: '"JetBrains Mono", "Fira Code", Consolas, monospace',
-    fontSize: 13,
-    lineHeight: 1.55,
-    cursorBlink: true,
-    cursorStyle: 'block',
-    scrollback: 5000,
-    allowProposedApi: true,
+    fontSize: 13, lineHeight: 1.55, cursorBlink: true, cursorStyle: 'block',
+    scrollback: 5000, allowProposedApi: true,
   });
-
   term.loadAddon(fitAddon);
-  term.open(document.getElementById('term-body'));
-  fitAddon.fit();
+  return { term, fitAddon };
+}
 
-  // ── Copy / Paste keyboard shortcuts ──
-  // Ctrl+Shift+C = copy selection, Ctrl+Shift+V = paste
-  // ── Terminal link detection (Ctrl/Cmd+Click or hover) ──
+function wireCommonTermBehaviors(entry) {
+  const { term, container, id } = entry;
   term.registerLinkProvider({
     provideLinks(y, cb) {
       const line = term.buffer.active.getLine(y - 1);
       if (!line) return cb([]);
       const text = line.translateToString(true);
       const re = /https?:\/\/[^\s\])"'<>]+/g;
-      const links = [];
-      let m;
+      const links = []; let m;
       while ((m = re.exec(text)) !== null) {
         const url = m[0];
         links.push({
-          text: url,
-          range: { start:{x:m.index+1,y}, end:{x:m.index+url.length,y} },
+          text: url, range: { start:{x:m.index+1,y}, end:{x:m.index+url.length,y} },
           activate(e, t) { api.openExternal(t); },
           hover(e, t) {
-            const el = document.querySelector('.xterm-rows');
-            if (el) el.style.cursor = 'pointer';
-            // Show tooltip
+            const el = container.querySelector('.xterm-rows'); if (el) el.style.cursor = 'pointer';
             let tip = document.getElementById('link-tip');
             if (!tip) { tip=document.createElement('div'); tip.id='link-tip'; tip.style.cssText='position:fixed;bottom:28px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.85);color:#60a5fa;font-size:11px;padding:3px 10px;border-radius:6px;pointer-events:none;z-index:9999;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'; document.body.appendChild(tip); }
             tip.textContent = t; tip.style.display='block';
           },
           leave() {
-            const el = document.querySelector('.xterm-rows');
-            if (el) el.style.cursor = '';
-            const tip = document.getElementById('link-tip');
-            if (tip) tip.style.display='none';
+            const el = container.querySelector('.xterm-rows'); if (el) el.style.cursor = '';
+            const tip = document.getElementById('link-tip'); if (tip) tip.style.display='none';
           }
         });
       }
@@ -898,175 +1265,265 @@ function initXterm() {
     }
   });
 
-  document.getElementById('term-body').addEventListener('keydown', e => {
+  term.onSelectionChange(() => { const sel = term.getSelection(); if (sel) navigator.clipboard.writeText(sel).catch(()=>{}); });
+  term.onResize(({ cols, rows }) => { if (entry.kind === 'shell') api.termResize(id, cols, rows); });
+  term.textarea?.addEventListener('focus', () => { focusedTermId = id; });
+
+  container.addEventListener('mousedown', () => { focusedTermId = id; });
+  container.addEventListener('keydown', e => {
     if (e.ctrlKey && e.shiftKey && e.key === 'C') {
       e.preventDefault();
-      const sel = term.getSelection();
-      if (sel) navigator.clipboard.writeText(sel);
+      const sel = term.getSelection(); if (sel) navigator.clipboard.writeText(sel);
     }
     if (e.ctrlKey && e.shiftKey && e.key === 'V') {
       e.preventDefault();
-      navigator.clipboard.readText().then(txt => {
-        if (activeTermTab === 'shell') api.shellInput(txt);
-        else if (activeTermTab === 'output' && isRunning) api.processInput(txt);
-      });
+      navigator.clipboard.readText().then(txt => sendToTerminal(id, txt));
     }
   });
-
-  // ── Right-click context menu ──
-  document.getElementById('term-body').addEventListener('contextmenu', e => {
+  container.addEventListener('contextmenu', e => {
     e.preventDefault();
-    const sel = term.getSelection();
-    showTermContextMenu(e.clientX, e.clientY, sel);
+    focusedTermId = id;
+    showTermContextMenu(e.clientX, e.clientY, term.getSelection(), id);
   });
-
-  // Auto-copy on selection (like most terminals)
-  term.onSelectionChange(() => {
-    const sel = term.getSelection();
-    if (sel) navigator.clipboard.writeText(sel).catch(() => {});
-  });
-
-  term.onResize(({ cols, rows }) => api.resizePty(cols, rows));
-
-  // ── Local line buffer — handles backspace/arrows/history without PTY ──
-  let lineBuf = '', lineCursor = 0, history = [], histIdx = -1, savedLine = '';
-
-  term.onData(data => {
-    if (activeTermTab === 'output') {
-      if (isRunning) handleOutputInput(data);
-      return;
-    }
-    // Shell tab: if PTY available, pass straight through (PTY handles editing)
-    // otherwise use local line buffer
-    if (window._hasPty) api.shellInput(data);
-    else handleShellInput(data);
-  });
-
-
-  // ── Output tab: accept stdin when process is running ──
-  let outBuf = '', outCursor = 0, outHistory = [], outHistIdx = -1, outSavedLine = '';
-
-  function handleShellInput(data) {
-    if (data === '\x03') { api.shellInput('\x03'); term.write('^C\r\n'); lineBuf=''; lineCursor=0; return; }
-    if (data === '\x0c') { term.clear(); return; }
-    if (data === '\r') {
-      term.write('\r\n');
-      if (lineBuf.trim()) { history.unshift(lineBuf); if(history.length>200) history.pop(); }
-      api.shellInput(lineBuf + '\r\n');
-      lineBuf=''; lineCursor=0; histIdx=-1; return;
-    }
-    if (data === '\x7f' || data === '\b') {
-      if (lineCursor>0) { lineBuf=lineBuf.slice(0,lineCursor-1)+lineBuf.slice(lineCursor); lineCursor--;
-        term.write('\b'+lineBuf.slice(lineCursor)+' '+'\b'.repeat(lineBuf.length-lineCursor+1)); } return;
-    }
-    if (data === '\x1b[3~') {
-      if (lineCursor<lineBuf.length) { lineBuf=lineBuf.slice(0,lineCursor)+lineBuf.slice(lineCursor+1);
-        term.write(lineBuf.slice(lineCursor)+' '+'\b'.repeat(lineBuf.length-lineCursor+1)); } return;
-    }
-    if (data==='\x1b[D'){if(lineCursor>0){lineCursor--;term.write(data);}return;}
-    if (data==='\x1b[C'){if(lineCursor<lineBuf.length){lineCursor++;term.write(data);}return;}
-    if (data==='\x1b[A'){if(histIdx===-1)savedLine=lineBuf;if(histIdx<history.length-1){histIdx++;_replaceLineWith(history[histIdx]);}return;}
-    if (data==='\x1b[B'){if(histIdx>-1){histIdx--;_replaceLineWith(histIdx===-1?savedLine:history[histIdx]);}return;}
-    if (data==='\x1b[H'){term.write('\b'.repeat(lineCursor));lineCursor=0;return;}
-    if (data==='\x1b[F'){term.write(lineBuf.slice(lineCursor));lineCursor=lineBuf.length;return;}
-    if (data.startsWith('\x1b')) return;
-    if (data>=' '||data==='\t') {
-      const ins=data==='\t'?'    ':data;
-      lineBuf=lineBuf.slice(0,lineCursor)+ins+lineBuf.slice(lineCursor); lineCursor+=ins.length;
-      term.write(ins+lineBuf.slice(lineCursor)+(lineCursor<lineBuf.length?'\b'.repeat(lineBuf.length-lineCursor):''));
-    }
-  }
-
-  function handleOutputInput(data) {
-    if (data === '\x03') { api.processInput('\x03'); term.write('^C\r\n'); outBuf = ''; outCursor = 0; return; }
-    if (data === '\r') {
-      term.write('\r\n');
-      if (outBuf.trim()) { outHistory.unshift(outBuf); if (outHistory.length > 200) outHistory.pop(); }
-      api.processInput(outBuf + '\n');
-      outBuf = ''; outCursor = 0; outHistIdx = -1;
-      return;
-    }
-    if (data === '\x7f' || data === '\b') {
-      if (outCursor > 0) {
-        outBuf = outBuf.slice(0, outCursor-1) + outBuf.slice(outCursor);
-        outCursor--;
-        term.write('\b' + outBuf.slice(outCursor) + ' ' + '\b'.repeat(outBuf.length - outCursor + 1));
-      }
-      return;
-    }
-    if (data === '\x1b[3~') {
-      if (outCursor < outBuf.length) {
-        outBuf = outBuf.slice(0, outCursor) + outBuf.slice(outCursor+1);
-        term.write(outBuf.slice(outCursor) + ' ' + '\b'.repeat(outBuf.length - outCursor + 1));
-      }
-      return;
-    }
-    if (data === '\x1b[D') { if (outCursor > 0) { outCursor--; term.write(data); } return; }
-    if (data === '\x1b[C') { if (outCursor < outBuf.length) { outCursor++; term.write(data); } return; }
-    if (data === '\x1b[A') {
-      if (outHistIdx === -1) outSavedLine = outBuf;
-      if (outHistIdx < outHistory.length-1) { outHistIdx++; _replaceOut(outHistory[outHistIdx]); }
-      return;
-    }
-    if (data === '\x1b[B') {
-      if (outHistIdx > -1) { outHistIdx--; _replaceOut(outHistIdx === -1 ? outSavedLine : outHistory[outHistIdx]); }
-      return;
-    }
-    if (data === '\x1b[H') { term.write('\b'.repeat(outCursor)); outCursor = 0; return; }
-    if (data === '\x1b[F') { term.write(outBuf.slice(outCursor)); outCursor = outBuf.length; return; }
-    if (data.startsWith('\x1b')) return;
-    if (data >= ' ') {
-      outBuf = outBuf.slice(0, outCursor) + data + outBuf.slice(outCursor);
-      outCursor++;
-      term.write(data + outBuf.slice(outCursor) + (outCursor < outBuf.length ? '\b'.repeat(outBuf.length - outCursor) : ''));
-    }
-  }
-
-  function _replaceOut(s) {
-    term.write('\b'.repeat(outCursor) + s + ' '.repeat(Math.max(0, outBuf.length - s.length)) + '\b'.repeat(Math.max(0, outBuf.length - s.length)));
-    outBuf = s; outCursor = s.length;
-  }
-
-  // IPC listeners
-  api.onShellOutput(data => {
-    if (activeTermTab === 'shell') term.write(data);
-  });
-  api.onShellExit(() => {
-    if (activeTermTab === 'shell')
-      term.write('\r\n\x1b[33m[Shell exited — click "+" to restart]\x1b[0m\r\n');
-  });
-  api.onShellError(msg => {
-    if (activeTermTab === 'shell')
-      term.write(`\r\n\x1b[31m[Shell error: ${msg}]\x1b[0m\r\n`);
-  });
-
-  api.onStdout(data => {
-    if (activeTermTab === 'output') term.write(data);
-  });
-  api.onStderr(data => {
-    if (activeTermTab === 'output') term.write('\x1b[31m' + data + '\x1b[0m');
-  });
-  api.onExit(code => {
-    isRunning = false;
-    updateRunBtn();
-    outBuf = ''; outCursor = 0;
-    if (activeTermTab === 'output') {
-      const ok = code === 0;
-      term.write(`\r\n\x1b[${ok?'32':'31'}m${'─'.repeat(40)}\x1b[0m\r\n`);
-      term.write(`\x1b[${ok?'32':'31'}m${ok?'✓':'✗'} Process exited with code ${code}\x1b[0m\r\n`);
-    }
-  });
-  api.onRunError(msg => {
-    isRunning = false; updateRunBtn(); outBuf = ''; outCursor = 0;
-    if (activeTermTab === 'output')
-      term.write(`\x1b[31m\r\n✗ Error: ${msg}\x1b[0m\r\n`);
-  });
-
-  term.write('\x1b[36;1mLiteIDE\x1b[0m \x1b[2m— Shell ready\x1b[0m\r\n');
 }
 
+function sendToTerminal(id, data) {
+  const t = terminals.get(id);
+  if (!t) return;
+  if (t.kind === 'output') { if (isRunning) handleOutputInput(t, data); return; }
+  if (t.hasPty) api.termInput(id, data);
+  else handleShellInputGeneric(t, data);
+}
+
+function createOutputTerminal() {
+  const { term, fitAddon } = makeXtermInstance();
+  const container = document.createElement('div');
+  container.style.cssText = 'width:100%;height:100%;';
+  const entry = { id:'output', kind:'output', name:'Output', term, fitAddon, container, closable:false,
+    outBuf:'', outCursor:0, outHistory:[], outHistIdx:-1, outSaved:'' };
+  terminals.set('output', entry);
+  wireCommonTermBehaviors(entry);
+  term.onData(data => sendToTerminal('output', data));
+  term.write('\x1b[2mOutput — run a file to see it here\x1b[0m\r\n');
+  return entry;
+}
+
+async function createShellTerminal(shellCmd, displayName) {
+  const id = 'shell-' + (++shellSessionCounter);
+  const { term, fitAddon } = makeXtermInstance();
+  const container = document.createElement('div');
+  container.style.cssText = 'width:100%;height:100%;';
+  const entry = { id, kind:'shell', name: displayName || 'Shell ' + shellSessionCounter, term, fitAddon, container,
+    closable:true, shellCmd, hasPty:false, lineBuf:'', lineCursor:0, lineHistory:[], lineHistIdx:-1, lineSaved:'' };
+  terminals.set(id, entry);
+  wireCommonTermBehaviors(entry);
+  term.onData(data => sendToTerminal(id, data));
+
+  const r = await api.termCreate(id, shellCmd);
+  if (!r.ok) { term.write(`\r\n\x1b[31m[Failed to start shell: ${r.error}]\x1b[0m\r\n`); return entry; }
+  entry.hasPty = r.hasPty;
+  entry.shellCmd = r.shellCmd;
+  entry.name = displayName || (r.shellCmd.split(/[/\\]/).pop());
+  term.write(`\x1b[36;1mLiteIDE\x1b[0m \x1b[2m— connected to ${entry.name}${r.hasPty ? '' : ' (no PTY — limited editing)'}\x1b[0m\r\n`);
+  if (currentFolder) setTimeout(() => api.termCd(id, currentFolder), 700);
+  return entry;
+}
+
+// ── Local line-buffer editing (used only when node-pty isn't available) ──
+function handleShellInputGeneric(t, data) {
+  const term = t.term;
+  if (data === '\x03') { api.termInput(t.id, '\x03'); term.write('^C\r\n'); t.lineBuf=''; t.lineCursor=0; return; }
+  if (data === '\x0c') { term.clear(); return; }
+  if (data === '\r') {
+    term.write('\r\n');
+    if (t.lineBuf.trim()) { t.lineHistory.unshift(t.lineBuf); if (t.lineHistory.length>200) t.lineHistory.pop(); }
+    api.termInput(t.id, t.lineBuf + '\r\n');
+    t.lineBuf=''; t.lineCursor=0; t.lineHistIdx=-1; return;
+  }
+  if (data === '\x7f' || data === '\b') {
+    if (t.lineCursor>0) { t.lineBuf=t.lineBuf.slice(0,t.lineCursor-1)+t.lineBuf.slice(t.lineCursor); t.lineCursor--;
+      term.write('\b'+t.lineBuf.slice(t.lineCursor)+' '+'\b'.repeat(t.lineBuf.length-t.lineCursor+1)); } return;
+  }
+  if (data === '\x1b[3~') {
+    if (t.lineCursor<t.lineBuf.length) { t.lineBuf=t.lineBuf.slice(0,t.lineCursor)+t.lineBuf.slice(t.lineCursor+1);
+      term.write(t.lineBuf.slice(t.lineCursor)+' '+'\b'.repeat(t.lineBuf.length-t.lineCursor+1)); } return;
+  }
+  if (data==='\x1b[D'){if(t.lineCursor>0){t.lineCursor--;term.write(data);}return;}
+  if (data==='\x1b[C'){if(t.lineCursor<t.lineBuf.length){t.lineCursor++;term.write(data);}return;}
+  if (data==='\x1b[A'){if(t.lineHistIdx===-1)t.lineSaved=t.lineBuf;if(t.lineHistIdx<t.lineHistory.length-1){t.lineHistIdx++;_replaceLineWithGeneric(t,t.lineHistory[t.lineHistIdx]);}return;}
+  if (data==='\x1b[B'){if(t.lineHistIdx>-1){t.lineHistIdx--;_replaceLineWithGeneric(t,t.lineHistIdx===-1?t.lineSaved:t.lineHistory[t.lineHistIdx]);}return;}
+  if (data==='\x1b[H'){term.write('\b'.repeat(t.lineCursor));t.lineCursor=0;return;}
+  if (data==='\x1b[F'){term.write(t.lineBuf.slice(t.lineCursor));t.lineCursor=t.lineBuf.length;return;}
+  if (data.startsWith('\x1b')) return;
+  if (data>=' '||data==='\t') {
+    const ins=data==='\t'?'    ':data;
+    t.lineBuf=t.lineBuf.slice(0,t.lineCursor)+ins+t.lineBuf.slice(t.lineCursor); t.lineCursor+=ins.length;
+    term.write(ins+t.lineBuf.slice(t.lineCursor)+(t.lineCursor<t.lineBuf.length?'\b'.repeat(t.lineBuf.length-t.lineCursor):''));
+  }
+}
+function _replaceLineWithGeneric(t, s) {
+  t.term.write('\b'.repeat(t.lineCursor) + s + ' '.repeat(Math.max(0, t.lineBuf.length - s.length)) + '\b'.repeat(Math.max(0, t.lineBuf.length - s.length)));
+  t.lineBuf = s; t.lineCursor = s.length;
+}
+
+// ── Output pseudo-terminal stdin (accepts input while a run is active) ──
+function handleOutputInput(t, data) {
+  const term = t.term;
+  if (data === '\x03') { api.processInput('\x03'); term.write('^C\r\n'); t.outBuf=''; t.outCursor=0; return; }
+  if (data === '\r') {
+    term.write('\r\n');
+    if (t.outBuf.trim()) { t.outHistory.unshift(t.outBuf); if (t.outHistory.length>200) t.outHistory.pop(); }
+    api.processInput(t.outBuf + '\n');
+    t.outBuf=''; t.outCursor=0; t.outHistIdx=-1; return;
+  }
+  if (data === '\x7f' || data === '\b') {
+    if (t.outCursor>0) { t.outBuf=t.outBuf.slice(0,t.outCursor-1)+t.outBuf.slice(t.outCursor); t.outCursor--;
+      term.write('\b'+t.outBuf.slice(t.outCursor)+' '+'\b'.repeat(t.outBuf.length-t.outCursor+1)); } return;
+  }
+  if (data === '\x1b[3~') {
+    if (t.outCursor<t.outBuf.length) { t.outBuf=t.outBuf.slice(0,t.outCursor)+t.outBuf.slice(t.outCursor+1);
+      term.write(t.outBuf.slice(t.outCursor)+' '+'\b'.repeat(t.outBuf.length-t.outCursor+1)); } return;
+  }
+  if (data === '\x1b[D') { if (t.outCursor>0) { t.outCursor--; term.write(data); } return; }
+  if (data === '\x1b[C') { if (t.outCursor<t.outBuf.length) { t.outCursor++; term.write(data); } return; }
+  if (data === '\x1b[A') { if (t.outHistIdx===-1) t.outSaved=t.outBuf; if (t.outHistIdx<t.outHistory.length-1) { t.outHistIdx++; _replaceOutGeneric(t, t.outHistory[t.outHistIdx]); } return; }
+  if (data === '\x1b[B') { if (t.outHistIdx>-1) { t.outHistIdx--; _replaceOutGeneric(t, t.outHistIdx===-1?t.outSaved:t.outHistory[t.outHistIdx]); } return; }
+  if (data === '\x1b[H') { term.write('\b'.repeat(t.outCursor)); t.outCursor=0; return; }
+  if (data === '\x1b[F') { term.write(t.outBuf.slice(t.outCursor)); t.outCursor=t.outBuf.length; return; }
+  if (data.startsWith('\x1b')) return;
+  if (data >= ' ') {
+    t.outBuf = t.outBuf.slice(0,t.outCursor)+data+t.outBuf.slice(t.outCursor); t.outCursor++;
+    term.write(data+t.outBuf.slice(t.outCursor)+(t.outCursor<t.outBuf.length?'\b'.repeat(t.outBuf.length-t.outCursor):''));
+  }
+}
+function _replaceOutGeneric(t, s) {
+  t.term.write('\b'.repeat(t.outCursor) + s + ' '.repeat(Math.max(0, t.outBuf.length - s.length)) + '\b'.repeat(Math.max(0, t.outBuf.length - s.length)));
+  t.outBuf = s; t.outCursor = s.length;
+}
+
+// ── Tabs bar + panes ──────────────────────────────────────────────────────
+function renderTermTabs() {
+  const bar = document.getElementById('term-tabs');
+  bar.innerHTML = '';
+  for (const t of terminals.values()) {
+    if (t.kind === 'shell') {
+      const btn = document.createElement('button');
+      btn.className = 'tt' + (t.id === leftTermId ? ' active' : '');
+      btn.innerHTML = `<span>${t.name}</span><button class="tt-x">✕</button>`;
+      btn.addEventListener('click', e => { if (e.target.classList.contains('tt-x')) return; setLeftTerm(t.id); });
+      btn.querySelector('.tt-x').addEventListener('click', () => closeShellTerminal(t.id));
+      bar.appendChild(btn);
+    }
+  }
+  const outBtn = document.createElement('button');
+  outBtn.className = 'tt' + (leftTermId === 'output' ? ' active' : '');
+  outBtn.textContent = 'Output';
+  outBtn.addEventListener('click', () => setLeftTerm('output'));
+  bar.appendChild(outBtn);
+}
+
+function attachTerminalToPane(id, paneEl) {
+  const t = terminals.get(id);
+  if (!t) return;
+  if (t.container.parentElement !== paneEl) { paneEl.innerHTML=''; paneEl.appendChild(t.container); }
+  if (!t.opened) { t.term.open(t.container); t.opened = true; }
+  requestAnimationFrame(() => { try { t.fitAddon.fit(); } catch {} });
+}
+
+function renderTermPanes() {
+  const left = document.getElementById('term-pane-left');
+  const right = document.getElementById('term-pane-right');
+  left.classList.add('show');
+  attachTerminalToPane(leftTermId, left);
+  if (termSplit) {
+    right.classList.add('show');
+    if (!rightTermId || rightTermId === leftTermId) {
+      const ids = [...terminals.keys()].filter(id => id !== leftTermId);
+      rightTermId = ids[0] || null;
+    }
+    renderPaneRightPicker();
+    if (rightTermId) attachTerminalToPane(rightTermId, right);
+  } else {
+    right.classList.remove('show');
+  }
+}
+
+function renderPaneRightPicker() {
+  const right = document.getElementById('term-pane-right');
+  let picker = right.querySelector('.term-pane-select');
+  if (!picker) {
+    picker = document.createElement('select');
+    picker.className = 'term-pane-select';
+    picker.addEventListener('change', () => { rightTermId = picker.value; renderTermPanes(); });
+  }
+  picker.innerHTML = '';
+  for (const t of terminals.values()) {
+    const o = document.createElement('option');
+    o.value = t.id; o.textContent = t.name;
+    if (t.id === rightTermId) o.selected = true;
+    picker.appendChild(o);
+  }
+  right.appendChild(picker); // re-append keeps it on top after innerHTML reset in attach
+}
+
+function setLeftTerm(id) {
+  leftTermId = id;
+  renderTermTabs();
+  renderTermPanes();
+}
+
+function toggleTermSplit() {
+  termSplit = !termSplit;
+  document.getElementById('term-split-btn').classList.toggle('active', termSplit);
+  renderTermPanes();
+}
+
+function clearFocusedTerm() {
+  const t = terminals.get(focusedTermId) || terminals.get(leftTermId);
+  if (t) t.term.clear();
+}
+
+async function closeShellTerminal(id) {
+  if (id === 'output') return; // Output is permanent
+  api.termClose(id);
+  const t = terminals.get(id);
+  if (t) t.term.dispose();
+  terminals.delete(id);
+  if (leftTermId === id) {
+    const remaining = [...terminals.keys()];
+    leftTermId = remaining.includes('output') ? (remaining.find(x=>x!=='output') || 'output') : remaining[0];
+  }
+  if (rightTermId === id) rightTermId = null;
+  renderTermTabs();
+  renderTermPanes();
+}
+
+// ── New shell picker modal (system shell auto-detection) ──────────────────
+async function openShellPicker() {
+  const shells = await api.getShells();
+  const list = document.getElementById('shell-picker-list');
+  list.innerHTML = '';
+  if (!shells.length) {
+    list.innerHTML = '<div style="font-size:12px;color:var(--t3)">No shells detected on this system.</div>';
+  } else {
+    shells.forEach(s => {
+      const el = document.createElement('div');
+      el.className = 'spk-item';
+      el.textContent = '🖥️  ' + s.name;
+      el.onclick = async () => {
+        closeShellPicker();
+        const entry = await createShellTerminal(s.cmd, s.name);
+        setLeftTerm(entry.id);
+      };
+      list.appendChild(el);
+    });
+  }
+  document.getElementById('shell-picker-overlay').classList.add('show');
+}
+function closeShellPicker() { document.getElementById('shell-picker-overlay').classList.remove('show'); }
+
 // ── Terminal right-click context menu ────────────────────────
-function showTermContextMenu(x, y, selection) {
+function showTermContextMenu(x, y, selection, termId) {
   let menu = document.getElementById('term-ctx');
   if (!menu) {
     menu = document.createElement('div');
@@ -1077,7 +1534,7 @@ function showTermContextMenu(x, y, selection) {
       min-width:160px;box-shadow:0 12px 40px rgba(0,0,0,.6);`;
     document.body.appendChild(menu);
   }
-
+  const t = terminals.get(termId);
   const item = (icon, label, action, disabled) => {
     const el = document.createElement('div');
     el.style.cssText = `display:flex;align-items:center;gap:9px;padding:6px 12px;
@@ -1092,104 +1549,84 @@ function showTermContextMenu(x, y, selection) {
     }
     return el;
   };
-
-  const sep = () => {
-    const el = document.createElement('div');
-    el.style.cssText = 'height:1px;background:rgba(255,255,255,.07);margin:3px 0;';
-    return el;
-  };
+  const sep = () => { const el = document.createElement('div'); el.style.cssText = 'height:1px;background:rgba(255,255,255,.07);margin:3px 0;'; return el; };
 
   menu.innerHTML = '';
-  menu.appendChild(item('📋', 'Copy', () => {
-    const sel = term.getSelection();
-    if (sel) navigator.clipboard.writeText(sel);
-  }, !selection));
-  menu.appendChild(item('📌', 'Paste', () => {
-    navigator.clipboard.readText().then(txt => {
-      if (activeTermTab === 'shell') api.shellInput(txt);
-      else if (activeTermTab === 'output' && isRunning) api.processInput(txt);
-    });
-  }, false));
-  menu.appendChild(item('🔲', 'Select All', () => term.selectAll(), false));
+  menu.appendChild(item('📋', 'Copy', () => { if (selection) navigator.clipboard.writeText(selection); }, !selection));
+  menu.appendChild(item('📌', 'Paste', () => { navigator.clipboard.readText().then(txt => sendToTerminal(termId, txt)); }, false));
+  menu.appendChild(item('🔲', 'Select All', () => t?.term.selectAll(), false));
   menu.appendChild(sep());
-  menu.appendChild(item('🗑️', 'Clear', () => term.clear(), false));
-  if (currentFolder) {
+  menu.appendChild(item('🗑️', 'Clear', () => t?.term.clear(), false));
+  if (currentFolder && t?.kind === 'shell') {
     menu.appendChild(sep());
-    menu.appendChild(item('📁', 'CD to Project', () => {
-      api.shellInput(`cd "${currentFolder}"\r`);
-    }, false));
+    menu.appendChild(item('📁', 'CD to Project', () => api.termCd(termId, currentFolder), false));
   }
-
   menu.style.display = 'block';
   menu.style.left = Math.min(x, window.innerWidth - 170) + 'px';
   menu.style.top  = Math.min(y, window.innerHeight - 220) + 'px';
-
-  setTimeout(() => document.addEventListener('click', () => {
-    menu.style.display = 'none';
-  }, { once: true }), 50);
+  setTimeout(() => document.addEventListener('click', () => { menu.style.display = 'none'; }, { once: true }), 50);
 }
-async function loadShells() {
-  const shells = await api.getShells();
-  const sel = document.getElementById('shellSel');
-  sel.innerHTML = '';
-  if (!shells.length) {
-    sel.innerHTML = '<option value="">No shell found</option>';
-    return;
-  }
-  shells.forEach(s => {
-    const o = document.createElement('option');
-    o.value = s.cmd; o.textContent = s.name;
-    sel.appendChild(o);
+
+// ── Wire up IPC events once, globally (not per-session — routed by id) ────
+function initTerminalSystem() {
+  createOutputTerminal();
+  api.onTermOutput(({ id, data }) => { const t = terminals.get(id); if (t) t.term.write(data); });
+  api.onTermExit(({ id }) => { const t = terminals.get(id); if (t) t.term.write('\r\n\x1b[33m[Shell exited]\x1b[0m\r\n'); });
+  api.onTermError(({ id, msg }) => { const t = terminals.get(id); if (t) t.term.write(`\r\n\x1b[31m[Shell error: ${msg}]\x1b[0m\r\n`); });
+
+  api.onStdout(data => { const t = terminals.get('output'); if (t) t.term.write(data); });
+  api.onStderr(data => { const t = terminals.get('output'); if (t) t.term.write('\x1b[31m' + data + '\x1b[0m'); });
+  api.onExit(code => {
+    isRunning = false; updateRunBtn();
+    const t = terminals.get('output'); if (!t) return;
+    t.outBuf=''; t.outCursor=0;
+    const ok = code === 0;
+    t.term.write(`\r\n\x1b[${ok?'32':'31'}m${'─'.repeat(40)}\x1b[0m\r\n`);
+    t.term.write(`\x1b[${ok?'32':'31'}m${ok?'✓':'✗'} Process exited with code ${code}\x1b[0m\r\n`);
   });
-  const r = await api.spawnShell(shells[0].cmd);
-  window._hasPty = r && r.hasPty;
-  if (currentFolder) cdShellTo(currentFolder);
+  api.onRunError(msg => {
+    isRunning = false; updateRunBtn();
+    const t = terminals.get('output'); if (!t) return;
+    t.outBuf=''; t.outCursor=0;
+    t.term.write(`\x1b[31m\r\n✗ Error: ${msg}\x1b[0m\r\n`);
+  });
+
+  // Boot: auto-connect to the system's default detected shell + show Output as fallback
+  (async () => {
+    const shells = await api.getShells();
+    if (shells.length) {
+      const entry = await createShellTerminal(null, null); // null cmd → main process auto-detects
+      leftTermId = entry.id;
+    } else {
+      leftTermId = 'output';
+    }
+    renderTermTabs();
+    renderTermPanes();
+  })();
 }
 
-async function changeShell(cmd) {
-  if (!cmd) return;
-  term.clear();
-  const r = await api.spawnShell(cmd);
-  window._hasPty = r && r.hasPty;
-  if (currentFolder) cdShellTo(currentFolder);
-}
-
-async function respawnShell() {
-  const sel = document.getElementById('shellSel');
-  term.clear();
-  if (sel.value) {
-    const r = await api.spawnShell(sel.value);
-    window._hasPty = r && r.hasPty;
-    if (currentFolder) cdShellTo(currentFolder);
+// CD every open shell session to a folder (used when a project folder is opened)
+function cdShellTo(dir) {
+  if (!dir) return;
+  for (const t of terminals.values()) {
+    if (t.kind === 'shell') setTimeout(() => api.termCd(t.id, dir), 700);
   }
 }
 
-function switchTab(tab) {
-  activeTermTab = tab;
-  document.querySelectorAll('.tt').forEach(b =>
-    b.classList.toggle('active', b.dataset.tab === tab)
-  );
-  term.clear();
-  if (tab === 'shell') { term.write('\x1b[36mShell\x1b[0m\r\n'); respawnShell(); }
-  updateStdinHint();
-}
 
 // ═══════════════════════════════════════════
 //  FILE SYSTEM
 // ═══════════════════════════════════════════
-// CD all shell types to folder after short delay (shell needs time to init)
-function cdShellTo(dir) {
-  if (!dir) return;
-  setTimeout(() => api.shellCd(dir), 700);
-}
-
 async function openFolder() {
   const p = await api.openFolder();
   if (!p) return;
   currentFolder = p;
+  if (window.api?.agent) api.agent.setProjectRoot(p);
   await refreshTree();
   toast('📂 ' + p.split(/[/\\]/).pop());
   cdShellTo(p);
+  if (agentInitDone) { await loadAgentMemory(); await loadPersistedHistory(); }
+  refreshGitStatus();
 }
 
 async function refreshTree() {
@@ -1217,7 +1654,8 @@ function renderItem(item, parent) {
   const toggle = `<span class="ti-toggle">${item.isDir ? '▶' : ''}</span>`;
   const icon   = `<span class="ti-icon">${getIcon(item)}</span>`;
   const name   = `<span class="ti-name">${item.name}</span>`;
-  el.innerHTML = toggle + icon + name;
+  const gitBadge = !item.isDir ? `<span class="ti-git" data-git-path="${item.path}"></span>` : '';
+  el.innerHTML = toggle + icon + name + gitBadge;
 
   if (item.isDir) {
     const kids = document.createElement('div');
@@ -1281,7 +1719,7 @@ async function openFile(filePath, fileName) {
 
   // Auto-set language selector
   if (EXT_TO_LANG[ext]) {
-    document.getElementById('langSelect').value = lang;
+    document.getElementById('langName').textContent = lang;
     currentLang = lang;
     checkLang(lang);
   }
@@ -1289,6 +1727,7 @@ async function openFile(filePath, fileName) {
 
 function activateTabObj(tab) {
   activeTab = tab;
+  if (typeof aiPanelActive !== 'undefined' && aiPanelActive) hideAiPanelOnly();
 
   // Update tree highlight
   document.querySelectorAll('.ti').forEach(el =>
@@ -1297,9 +1736,10 @@ function activateTabObj(tab) {
 
   // Show editor
   document.getElementById('welcome').style.display    = 'none';
-  document.getElementById('monaco-host').style.display = 'flex';
+  document.getElementById('editor-panes').style.display = 'flex';
 
   if (editor) editor.setModel(tab.model);
+  refreshPaneBSelectOptions();
 
   // Breadcrumb
   const parts = tab.path.replace(/\\/g, '/').split('/');
@@ -1345,7 +1785,7 @@ function closeTab(filePath) {
     } else {
       activeTab = null;
       document.getElementById('welcome').style.display    = 'flex';
-      document.getElementById('monaco-host').style.display = 'none';
+      document.getElementById('editor-panes').style.display = 'none';
       document.getElementById('breadcrumb').textContent  = 'No file open';
       if (editor) editor.setModel(null);
     }
@@ -1530,7 +1970,8 @@ function openInstall() {
   function updateStdinHint() {
     const hdr = document.getElementById('term-header');
     let badge = document.getElementById('stdin-badge');
-    if (isRunning && activeTermTab === 'output') {
+    const outputVisible = leftTermId === 'output' || (termSplit && rightTermId === 'output');
+    if (isRunning && outputVisible) {
       if (!badge) {
         badge = document.createElement('span');
         badge.id = 'stdin-badge';
@@ -1564,9 +2005,10 @@ async function toggleRun() {
   await saveFile();
 
   // Switch to output
-  switchTab('output');
-  term.clear();
-  term.write(`\x1b[36;1m▶ Running\x1b[0m \x1b[37m${activeTab.name}\x1b[0m\r\n\r\n`);
+  setLeftTerm('output');
+  const outT = terminals.get('output');
+  outT.term.clear();
+  outT.term.write(`\x1b[36;1m▶ Running\x1b[0m \x1b[37m${activeTab.name}\x1b[0m\r\n\r\n`);
 
   isRunning = true;
   updateRunBtn();
@@ -1629,10 +2071,13 @@ function setupTerminalResize() {
 function showCtxMenu(e, item) {
   e.preventDefault();
   const menu = document.getElementById('ctx-menu');
+  const rel = toProjectRelPath(item.path);
+  const hasGitChange = rel && gitStatusMap[rel];
   menu.innerHTML = `
     <div class="ctx-item" onclick="openFile('${item.path.replace(/'/g,"\\'")}','${item.name.replace(/'/g,"\\'")}')">
       <span>📂</span> Open
     </div>
+    ${hasGitChange ? `<div class="ctx-item" onclick="openDiffModal('${item.path.replace(/'/g,"\\'")}','${item.name.replace(/'/g,"\\'")}')"><span>🔀</span> View Git Diff</div>` : ''}
     <div class="ctx-sep"></div>
     <div class="ctx-item danger" onclick="deleteFileCtx('${item.path.replace(/'/g,"\\'")}')">
       <span>🗑️</span> Delete
@@ -1671,8 +2116,679 @@ function toast(msg, dur = 2500) {
 }
 
 // ═══════════════════════════════════════════
+//  GIT STATUS + DIFF
+// ═══════════════════════════════════════════
+let gitStatusMap = {};
+let gitPollTimer = null;
+
+function toProjectRelPath(absPath) {
+  if (!currentFolder || !absPath) return null;
+  let rel = absPath.startsWith(currentFolder) ? absPath.slice(currentFolder.length) : null;
+  if (rel === null) return null;
+  return rel.replace(/^[\\/]/, '').replace(/\\/g, '/');
+}
+
+function initGitPolling() {
+  refreshGitStatus();
+  clearInterval(gitPollTimer);
+  gitPollTimer = setInterval(refreshGitStatus, 4000); // covers changes from the AI agent, external editors, or shell commands
+}
+
+async function refreshGitStatus() {
+  if (!currentFolder) { gitStatusMap = {}; return; }
+  const isRepo = await api.gitIsRepo();
+  if (!isRepo) { gitStatusMap = {}; return; }
+  gitStatusMap = await api.gitStatus();
+  applyGitBadges();
+}
+
+function applyGitBadges() {
+  document.querySelectorAll('.ti-git[data-git-path]').forEach(el => {
+    const rel = toProjectRelPath(el.dataset.gitPath);
+    const code = rel ? gitStatusMap[rel] : null;
+    if (!code) { el.textContent = ''; el.className = 'ti-git'; return; }
+    const letter = code.includes('?') ? 'U' : code[0];
+    el.textContent = letter;
+    el.className = 'ti-git ' + letter;
+    el.title = { M:'Modified', A:'Added', D:'Deleted', U:'Untracked', R:'Renamed' }[letter] || code;
+  });
+}
+
+async function openDiffModal(absPath, name) {
+  const rel = toProjectRelPath(absPath);
+  if (!rel) return;
+  const diff = await api.gitDiff(rel);
+  if (!diff.ok) { toast('⚠️ ' + diff.error); return; }
+  document.getElementById('diff-card-title').textContent = (diff.untracked ? '🆕 ' : '🔀 ') + name;
+  document.getElementById('diff-overlay').classList.add('show');
+  const host = document.getElementById('diff-host');
+  host.innerHTML = '';
+  if (!diffEditorInstance) {
+    diffEditorInstance = monaco.editor.createDiffEditor(host, {
+      theme: 'vs-dark', readOnly: true, automaticLayout: true, renderSideBySide: true, fontSize: 13,
+    });
+  } else {
+    diffEditorInstance.getContainerDomNode().remove?.();
+  }
+  const lang = MONACO_LANG[currentLang] || guessLangFromName(name);
+  diffEditorInstance.setModel({
+    original: monaco.editor.createModel(diff.original, lang),
+    modified: monaco.editor.createModel(diff.modified, lang),
+  });
+  requestAnimationFrame(() => diffEditorInstance.layout());
+}
+let diffEditorInstance = null;
+function guessLangFromName(name) {
+  const ext = name.split('.').pop();
+  const map = { js:'javascript', ts:'typescript', py:'python', json:'json', html:'html', css:'css', md:'markdown', go:'go', rs:'rust', java:'java', c:'c', cpp:'cpp' };
+  return map[ext] || 'plaintext';
+}
+function closeDiffModal() {
+  document.getElementById('diff-overlay').classList.remove('show');
+}
+
+// ═══════════════════════════════════════════
+//  SIDEBAR: PROJECT SEARCH & REPLACE
+// ═══════════════════════════════════════════
+const searchOpts = { caseSensitive:false, wholeWord:false, regex:false };
+let lastSearchResults = [];
+
+function switchSidebarPanel(panel) {
+  document.querySelectorAll('.sbt').forEach(b => b.classList.toggle('active', b.dataset.panel === panel));
+  document.getElementById('explorer-panel').classList.toggle('show', panel === 'explorer');
+  document.getElementById('search-panel').classList.toggle('show', panel === 'search');
+  if (panel === 'search') document.getElementById('search-query').focus();
+}
+
+function toggleSearchOpt(opt) {
+  const key = opt === 'case' ? 'caseSensitive' : opt === 'word' ? 'wholeWord' : 'regex';
+  searchOpts[key] = !searchOpts[key];
+  document.getElementById('sp-' + opt).classList.toggle('on', searchOpts[key]);
+}
+
+async function runProjectSearch() {
+  if (!currentFolder) { toast('⚠️ Open a folder first'); return; }
+  const query = document.getElementById('search-query').value;
+  if (!query) return;
+  const resultsEl = document.getElementById('search-results');
+  resultsEl.innerHTML = '<div class="sb-empty">Searching…</div>';
+  const res = await api.searchProject(query, searchOpts);
+  if (!res.ok) { resultsEl.innerHTML = `<div class="sb-empty">${res.error}</div>`; return; }
+  lastSearchResults = res.results;
+  renderSearchResults(res.results, query);
+}
+
+function renderSearchResults(results, query) {
+  const resultsEl = document.getElementById('search-results');
+  const summary = document.getElementById('sp-summary');
+  resultsEl.innerHTML = '';
+  if (!results.length) { resultsEl.innerHTML = '<div class="sb-empty">No matches</div>'; summary.textContent = ''; return; }
+  const byFile = new Map();
+  for (const r of results) { if (!byFile.has(r.file)) byFile.set(r.file, []); byFile.get(r.file).push(r); }
+  summary.textContent = `${results.length} match${results.length===1?'':'es'} in ${byFile.size} file${byFile.size===1?'':'s'}`;
+  for (const [file, lines] of byFile) {
+    const head = document.createElement('div');
+    head.className = 'sr-file';
+    head.textContent = file;
+    resultsEl.appendChild(head);
+    for (const l of lines) {
+      const row = document.createElement('div');
+      row.className = 'sr-line';
+      row.innerHTML = `<span class="sr-ln">${l.line}</span><span class="sr-text"></span>`;
+      row.querySelector('.sr-text').textContent = l.text.trim();
+      row.addEventListener('click', () => openFileAtLine(file, l.line));
+      resultsEl.appendChild(row);
+    }
+  }
+}
+
+async function openFileAtLine(relPath, line) {
+  const absPath = currentFolder.replace(/[\\/]+$/, '') + '/' + relPath;
+  await openFile(absPath, relPath.split('/').pop());
+  if (editor) {
+    editor.revealLineInCenter(line);
+    editor.setPosition({ lineNumber: line, column: 1 });
+    editor.focus();
+  }
+}
+
+async function runProjectReplaceAll() {
+  if (!currentFolder) { toast('⚠️ Open a folder first'); return; }
+  const query = document.getElementById('search-query').value;
+  const replacement = document.getElementById('search-replacement').value;
+  if (!query) return;
+  const affectedFiles = [...new Set(lastSearchResults.map(r => r.file))];
+  if (!affectedFiles.length) { toast('Run a search first'); return; }
+  const ok = confirm(`Replace all matches of "${query}" across ${affectedFiles.length} file(s)? This writes directly to disk.`);
+  if (!ok) return;
+  const res = await api.replaceAll(query, replacement, searchOpts, affectedFiles);
+  if (!res.ok) { toast('⚠️ ' + res.error); return; }
+  toast(`✅ Replaced ${res.changedLines} match(es) in ${res.changedFiles} file(s)`);
+  // Reload any open tabs whose files were just rewritten on disk
+  for (const tab of tabs) {
+    const rel = toProjectRelPath(tab.path);
+    if (rel && affectedFiles.includes(rel)) {
+      const content = await api.readFile(tab.path);
+      tab.model.setValue(content);
+      tab.unsaved = false;
+    }
+  }
+  refreshTabsBar();
+  await runProjectSearch();
+}
+
+// ═══════════════════════════════════════════
+//  SPLIT EDITOR (side-by-side pane B)
+// ═══════════════════════════════════════════
+let editorB = null;
+let activeTabB = null;
+let splitEditorActive = false;
+
+function toggleEditorSplit() {
+  if (!editorB) initEditorB();
+  splitEditorActive = !splitEditorActive;
+  document.getElementById('split-editor-btn').classList.toggle('active', splitEditorActive);
+  document.getElementById('pane-b-wrap').classList.toggle('show', splitEditorActive);
+  if (splitEditorActive) {
+    refreshPaneBSelectOptions();
+    if (!activeTabB && tabs.length) setPaneBTab(tabs[tabs.length - 1].path);
+    requestAnimationFrame(() => editorB?.layout());
+  }
+  requestAnimationFrame(() => editor?.layout());
+}
+function closeEditorSplit() {
+  splitEditorActive = false;
+  document.getElementById('split-editor-btn').classList.remove('active');
+  document.getElementById('pane-b-wrap').classList.remove('show');
+  requestAnimationFrame(() => editor?.layout());
+}
+
+function initEditorB() {
+  editorB = monaco.editor.create(document.getElementById('monaco-host-b'), {
+    theme: 'vs-dark', automaticLayout: true, fontSize: 13,
+    fontFamily: '"JetBrains Mono", "Fira Code", Consolas, monospace',
+    minimap: { enabled: false }, scrollBeyondLastLine: false, smoothScrolling: true,
+    cursorBlink: 'smooth', padding: { top: 12 },
+  });
+  editorB.onDidChangeModelContent(() => {
+    if (activeTabB) { activeTabB.unsaved = true; refreshTabsBar(); debouncedSaveB(); }
+  });
+}
+
+function refreshPaneBSelectOptions() {
+  if (!splitEditorActive) return;
+  const sel = document.getElementById('pane-b-select');
+  if (!sel) return;
+  sel.innerHTML = '';
+  tabs.forEach(t => {
+    const o = document.createElement('option');
+    o.value = t.path; o.textContent = t.name;
+    if (activeTabB && t.path === activeTabB.path) o.selected = true;
+    sel.appendChild(o);
+  });
+}
+
+function setPaneBTab(filePath) {
+  const tab = tabs.find(t => t.path === filePath);
+  if (!tab || !editorB) return;
+  activeTabB = tab;
+  editorB.setModel(tab.model);
+  refreshPaneBSelectOptions();
+}
+function onPaneBSelectChange(filePath) { setPaneBTab(filePath); }
+
+let saveBTimer = null;
+function debouncedSaveB() {
+  clearTimeout(saveBTimer);
+  saveBTimer = setTimeout(saveFileB, 500);
+}
+async function saveFileB() {
+  if (!activeTabB || !editorB) return;
+  await api.writeFile(activeTabB.path, editorB.getValue());
+  activeTabB.unsaved = false;
+  refreshTabsBar();
+  refreshGitStatus();
+}
+
+
+// ═══════════════════════════════════════════
+//  AI AGENT (additive — does not touch editor/tab/shell core logic)
+// ═══════════════════════════════════════════
+let aiPanelActive = false;
+let agentBusy = false;
+const agentHistory = []; // normalized {role, content} for the active session
+const MODEL_OPTIONS = {
+  anthropic: ['claude-sonnet-4-6', 'claude-opus-4-8', 'claude-haiku-4-5-20251001'],
+  openai:    ['gpt-5.1', 'gpt-5.1-mini', 'gpt-5.1-nano'],
+  gemini:    ['gemini-2.5-pro', 'gemini-2.5-flash'],
+  ollama:    [], // populated live from the local Ollama server
+};
+
+async function openAgentTab() {
+  document.getElementById('ai-tab-trigger').style.display = 'none';
+  if (!agentInitDone) await initAgentSettings();
+  showAiPanelOnly();
+}
+
+function closeAgentTab() {
+  hideAiPanelOnly();
+  // Restore whatever was showing before (a file tab, or the welcome screen)
+  if (activeTab) { document.getElementById('editor-panes').style.display = 'flex'; }
+  else { document.getElementById('welcome').style.display = 'flex'; }
+}
+
+function showAiPanelOnly() {
+  aiPanelActive = true;
+  document.getElementById('welcome').style.display = 'none';
+  document.getElementById('editor-panes').style.display = 'none';
+  document.getElementById('ai-panel').classList.add('show');
+}
+// Called by the single additive hook in activateTabObj, and by closeAgentTab —
+// just flips the AI panel off; leaves normal file-tab display logic untouched.
+function hideAiPanelOnly() {
+  aiPanelActive = false;
+  document.getElementById('ai-panel').classList.remove('show');
+  document.getElementById('ai-tab-trigger').style.display = 'flex';
+}
+
+let agentInitDone = false;
+async function initAgentSettings() {
+  agentInitDone = true;
+  const cfg = await api.ai.getConfig();
+  document.getElementById('ai-provider-sel').value = cfg.provider || 'anthropic';
+  document.getElementById('ai-ollama-url').value = cfg.ollamaUrl || 'http://localhost:11434';
+  document.getElementById('ai-model-input').value = cfg.model || '';
+  onProviderChange(cfg.model);
+  document.getElementById('ai-status-dot').classList.toggle('on', !!(cfg.hasKey && cfg.hasKey[cfg.provider]) || cfg.provider === 'ollama');
+  document.getElementById('ai-key-input').placeholder = (cfg.hasKey && cfg.hasKey[cfg.provider]) ? 'Key saved (hidden)' : 'API key';
+
+  document.getElementById('ai-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendAgentMessage(); }
+  });
+  api.agent.onApprovalRequest(req => showApprovalModal(req));
+  api.agent.onCommandOutput(({ stream, data }) => {
+    // Mirror agent-run command output into the Output terminal tab
+    const t = terminals.get('output');
+    if (t) t.term.write(data.replace(/\n/g, '\r\n'));
+  });
+
+  await loadAgentMemory();
+  await loadPersistedHistory();
+}
+
+// Model field is always free text — suggestions only, never restricted, so
+// older/newer/custom model names all just work.
+function onProviderChange(preselectModel) {
+  const provider = document.getElementById('ai-provider-sel').value;
+  const modelInput = document.getElementById('ai-model-input');
+  const keyWrap = document.getElementById('ai-key-wrap');
+  const ollamaWrap = document.getElementById('ai-ollama-url-wrap');
+  keyWrap.style.display = provider === 'ollama' ? 'none' : 'inline-flex';
+  ollamaWrap.style.display = provider === 'ollama' ? 'inline-flex' : 'none';
+  const list = document.getElementById('ai-model-list');
+  list.innerHTML = '';
+  MODEL_OPTIONS[provider].forEach(m => { const o = document.createElement('option'); o.value = m; list.appendChild(o); });
+  if (provider === 'ollama') refreshOllamaModels();
+  if (preselectModel) modelInput.value = preselectModel;
+  else if (!modelInput.value && MODEL_OPTIONS[provider][0]) modelInput.placeholder = 'e.g. ' + MODEL_OPTIONS[provider][0];
+}
+
+async function refreshOllamaModels() {
+  const list = document.getElementById('ai-model-list');
+  const models = await api.ai.listOllamaModels();
+  MODEL_OPTIONS.ollama = models;
+  list.innerHTML = '';
+  models.forEach(m => { const o = document.createElement('option'); o.value = m; list.appendChild(o); });
+  const input = document.getElementById('ai-model-input');
+  if (!input.value && models.length) input.placeholder = 'e.g. ' + models[0];
+  else if (!models.length) input.placeholder = 'No local models found — type one anyway or `ollama pull <model>`';
+}
+
+async function saveAiSettings() {
+  const provider = document.getElementById('ai-provider-sel').value;
+  const model = document.getElementById('ai-model-input').value.trim();
+  const keyVal = document.getElementById('ai-key-input').value.trim();
+  const ollamaUrl = document.getElementById('ai-ollama-url').value.trim() || 'http://localhost:11434';
+  if (!model) { toast('⚠️ Type a model name first'); return; }
+  const payload = { provider, model, ollamaUrl, keys: {} };
+  if (keyVal) payload.keys[provider] = keyVal;
+  await api.ai.saveConfig(payload);
+  document.getElementById('ai-key-input').value = '';
+  document.getElementById('ai-key-input').placeholder = keyVal ? 'Key saved (hidden)' : document.getElementById('ai-key-input').placeholder;
+  document.getElementById('ai-status-dot').classList.add('on');
+  toast('✨ AI settings saved');
+}
+
+async function clearAiKey() {
+  const provider = document.getElementById('ai-provider-sel').value;
+  if (!confirm(`Delete the stored ${provider} API key from disk? This can't be undone.`)) return;
+  await api.ai.clearKey(provider);
+  document.getElementById('ai-key-input').value = '';
+  document.getElementById('ai-key-input').placeholder = 'API key';
+  document.getElementById('ai-status-dot').classList.remove('on');
+  toast('🗑️ Key removed');
+}
+
+// Sends one throwaway message with no tools — the fastest way to confirm
+// "is my key valid and does this exact model name exist for this provider".
+async function testAiConnection() {
+  const provider = document.getElementById('ai-provider-sel').value;
+  const model = document.getElementById('ai-model-input').value.trim();
+  if (!model) { toast('⚠️ Type a model name first'); return; }
+  await saveAiSettings();
+  appendChatMsg('system', `● Testing ${provider} / ${model} …`);
+  const res = await api.ai.chatOnce({ provider, model, messages: [{ role:'user', content: 'Reply with exactly: OK' }], tools: [], systemPrompt: '' });
+  if (res.error) { appendChatMsg('system', '❌ Connection failed: ' + res.error); document.getElementById('ai-status-dot').classList.remove('on'); }
+  else { appendChatMsg('system', `✅ Connected. Model replied: "${(res.text||'').trim().slice(0,120)}"`); document.getElementById('ai-status-dot').classList.add('on'); }
+}
+
+// Exercises read/list/write/run/RAG end-to-end against the open project so you
+// can confirm tool execution works without trusting the model to do it right.
+async function runAgentSelfTest() {
+  if (!currentFolder) { toast('⚠️ Open a project folder first'); return; }
+  appendChatMsg('system', '● Running tool self-test (no AI model involved — this exercises the tool layer directly)…');
+  const testFile = '.liteide/selftest.txt';
+  const steps = [
+    ['list_dir',        {}                                            ],
+    ['write_file',      { path: testFile, content: 'LiteIDE agent self-test @ ' + new Date().toISOString() } ],
+    ['read_file',       { path: testFile }                            ],
+    ['search_codebase', { query: 'function' }                         ],
+    ['run_command',     { command: IS_WIN_UI ? 'echo agent-selftest-ok' : 'echo agent-selftest-ok' } ],
+    ['delete_file',     { path: testFile }                            ],
+  ];
+  for (const [name, args] of steps) {
+    const result = await execAgentTool(name, args);
+    appendToolCard(name, args, result);
+    if (result.ok === false) { appendChatMsg('system', `❌ Self-test failed at "${name}": ${result.error}`); return; }
+  }
+  appendChatMsg('system', '✅ Self-test passed — read, write, delete, run_command and RAG search all work against this project.');
+}
+const IS_WIN_UI = navigator.userAgent.includes('Windows');
+
+// ── Tool definitions exposed to every provider ──────────────────────────────
+const AGENT_TOOLS = [
+  { name: 'read_file', description: 'Read a text file relative to the open project folder.',
+    parameters: { type:'object', properties:{ path:{type:'string'} }, required:['path'] } },
+  { name: 'list_dir', description: 'List files/folders relative to the open project folder.',
+    parameters: { type:'object', properties:{ path:{type:'string'} } } },
+  { name: 'write_file', description: 'Create or overwrite a file relative to the project folder. Critical files (.env, package.json, git internals, keys) require user approval.',
+    parameters: { type:'object', properties:{ path:{type:'string'}, content:{type:'string'} }, required:['path','content'] } },
+  { name: 'delete_file', description: 'Delete a file relative to the project folder. Always requires user approval.',
+    parameters: { type:'object', properties:{ path:{type:'string'} }, required:['path'] } },
+  { name: 'run_command', description: 'Run a shell command in the project folder root. Output streams to the Output terminal tab. Destructive commands (rm -rf, force push, sudo, etc.) require user approval.',
+    parameters: { type:'object', properties:{ command:{type:'string'} }, required:['command'] } },
+  { name: 'search_codebase', description: 'Keyword/RAG search across the project\'s text files — use this before guessing file contents or locations.',
+    parameters: { type:'object', properties:{ query:{type:'string'} }, required:['query'] } },
+  { name: 'spawn_subagents', description: 'Delegate one or more independent sub-tasks to fresh sub-agents that run in parallel, each with their own read/write/run/search tools scoped to this project. Use this to fan out real parallel work (e.g. "write tests for file A" + "update docs for file B" at the same time). Each sub-agent runs to completion (or up to 8 steps) and returns a short result. Do not spawn sub-agents for trivial single steps — do those yourself directly.',
+    parameters: { type:'object', properties:{ tasks:{ type:'array', items:{ type:'string' }, description:'One instruction string per sub-agent to spawn in parallel.' } }, required:['tasks'] } },
+];
+
+async function execAgentTool(name, args) {
+  switch (name) {
+    case 'read_file':   return await api.agent.readFile(args.path);
+    case 'list_dir':     return await api.agent.listDir(args.path || '.');
+    case 'write_file': {
+      const r = await api.agent.writeFile(args.path, args.content ?? '');
+      if (r.ok && /(^|\/|\\)\.liteide[\/\\]agent-memory\.md$/i.test(args.path)) agentMemoryContent = args.content;
+      return r;
+    }
+    case 'delete_file':  return await api.agent.deleteFile(args.path);
+    case 'run_command':  return await api.agent.runCommand(args.command);
+    case 'search_codebase': return await api.agent.ragSearch(args.query, 8);
+    case 'spawn_subagents': return await runSubagentOrchestration(args.tasks || []);
+    default: return { ok:false, error:'Unknown tool: ' + name };
+  }
+}
+
+// ── Multi-agent orchestrator: spawn N isolated sub-agents, run them in true
+// parallel (Promise.all), stream their tool activity into their own cards,
+// and despawn (dispose their loop) the moment each finishes. ────────────────
+let subagentCounter = 0;
+async function runSubagentOrchestration(tasks) {
+  tasks = (tasks || []).filter(Boolean).slice(0, 4); // sane cap on parallelism/cost
+  if (!tasks.length) return { ok:false, error:'No tasks provided' };
+  const provider = document.getElementById('ai-provider-sel').value;
+  const model = document.getElementById('ai-model-input').value.trim();
+  const subTools = AGENT_TOOLS.filter(t => t.name !== 'spawn_subagents'); // no recursive spawning
+  const log = document.getElementById('ai-chat-log');
+
+  const headerCard = document.createElement('div');
+  headerCard.className = 'ai-tool-card';
+  headerCard.innerHTML = `<div class="th">🧬 spawn_subagents</div><div>${tasks.length} sub-agent(s) starting in parallel…</div>`;
+  log.appendChild(headerCard); log.scrollTop = log.scrollHeight;
+
+  async function runOne(taskText) {
+    const id = ++subagentCounter;
+    const card = document.createElement('div');
+    card.className = 'ai-tool-card';
+    card.style.borderColor = 'rgba(90,200,250,.35)';
+    card.innerHTML = `<div class="th">🤖 sub-agent #${id} — spawned</div><div>${taskText}</div>`;
+    log.appendChild(card); log.scrollTop = log.scrollHeight;
+
+    const history = [{ role:'user', content: taskText }];
+    const sysPrompt = `You are a focused sub-agent working inside project folder "${currentFolder}". Your one task: "${taskText}". Use tools to complete it directly and efficiently. When done, reply with a short 2-4 sentence summary of what you did (no further tool calls).`;
+    let finalText = '';
+    try {
+      for (let step = 0; step < 8; step++) {
+        const res = await api.ai.chatOnce({ provider, model, messages: history, tools: subTools, systemPrompt: sysPrompt });
+        if (res.error) { finalText = '⚠️ ' + res.error; break; }
+        let toolCalls = res.toolCalls;
+        if ((!toolCalls || !toolCalls.length) && res.text) {
+          const parsed = extractToolCallFromText(res.text);
+          if (parsed) { toolCalls = [parsed]; res.text = parsed.leftoverText || ''; }
+        }
+        history.push({ role:'assistant', content: res.text || '', toolCalls: toolCalls || [] });
+        if (res.text) finalText = res.text;
+        if (!toolCalls || !toolCalls.length) break;
+        for (const call of toolCalls) {
+          const result = await execAgentTool(call.name, call.args);
+          const stepEl = document.createElement('div');
+          stepEl.style.cssText = 'font-size:10.5px;color:var(--t3);margin-top:3px;';
+          stepEl.textContent = `↳ ${call.name}(${JSON.stringify(call.args).slice(0,90)})`;
+          card.appendChild(stepEl);
+          history.push({ role:'tool', name: call.name, tool_call_id: call.id, content: JSON.stringify(result) });
+        }
+      }
+    } catch (e) { finalText = '⚠️ ' + (e.message || e); }
+    card.querySelector('.th').textContent = `🤖 sub-agent #${id} — done (despawned)`;
+    const resultEl = document.createElement('pre');
+    resultEl.textContent = finalText || '(no output)';
+    card.appendChild(resultEl);
+    log.scrollTop = log.scrollHeight;
+    return { task: taskText, summary: finalText };
+  }
+
+  const results = await Promise.all(tasks.map(runOne)); // real parallel execution
+  headerCard.querySelector('.th').textContent = '🧬 spawn_subagents — all done';
+  return { ok: true, results };
+}
+
+// ── Persistent project memory + session continuity ──────────────────────────
+// The agent has no memory across sessions unless it writes one — this gives it
+// a place to (a) keep durable project notes, and (b) resume the actual chat
+// transcript so closing/reopening the AI tab (or the app) doesn't lose context.
+let agentMemoryContent = '';
+async function loadAgentMemory() {
+  if (!currentFolder) return;
+  const r = await api.agent.readFile('.liteide/agent-memory.md');
+  agentMemoryContent = r.ok ? r.content : '';
+}
+async function loadPersistedHistory() {
+  if (!currentFolder) return;
+  const r = await api.agent.readFile('.liteide/agent-session.json');
+  if (!r.ok) return;
+  try {
+    const saved = JSON.parse(r.content);
+    if (!Array.isArray(saved) || !saved.length) return;
+    agentHistory.push(...saved);
+    appendChatMsg('system', `— resumed session (${saved.filter(m=>m.role==='user').length} previous messages) —`);
+    for (const m of saved) {
+      if (m.role === 'user') appendChatMsg('user', m.content);
+      else if (m.role === 'assistant' && m.content) appendChatMsg('assistant', m.content);
+    }
+  } catch { /* corrupt/old session file, ignore */ }
+}
+function saveHistoryToDisk() {
+  if (!currentFolder) return;
+  api.agent.writeFile('.liteide/agent-session.json', JSON.stringify(agentHistory.slice(-60), null, 2)).catch(()=>{});
+}
+
+function appendChatMsg(role, text) {
+  const log = document.getElementById('ai-chat-log');
+  const el = document.createElement('div');
+  el.className = 'ai-msg ' + role;
+  el.textContent = text;
+  log.appendChild(el);
+  log.scrollTop = log.scrollHeight;
+  return el;
+}
+
+function appendToolCard(name, args, result) {
+  const log = document.getElementById('ai-chat-log');
+  const el = document.createElement('div');
+  const denied = result && result.ok === false && /denied/i.test(result.error || '');
+  el.className = 'ai-tool-card' + (denied ? ' denied' : '');
+  const icon = denied ? '🚫' : { read_file:'📖', list_dir:'📁', write_file:'✏️', delete_file:'🗑️', run_command:'⚡', search_codebase:'🔎' }[name] || '🔧';
+  const argStr = Object.entries(args || {}).map(([k,v]) => `${k}=${typeof v==='string' && v.length>60 ? v.slice(0,60)+'…' : v}`).join(', ');
+  el.innerHTML = `<div class="th">${icon} ${name}</div><div>${argStr}</div>`;
+  if (result) {
+    const pre = document.createElement('pre');
+    const summary = result.ok === false ? ('Error: ' + result.error)
+      : name === 'read_file' ? (result.content || '').slice(0, 500)
+      : name === 'run_command' ? ((result.stdout || '') + (result.stderr || '')).slice(-500)
+      : name === 'search_codebase' ? (result.results || []).map(r => `${r.file}:${r.start}`).join('\n')
+      : JSON.stringify(result).slice(0, 500);
+    pre.textContent = summary || '(done)';
+    el.appendChild(pre);
+  }
+  log.appendChild(el);
+  log.scrollTop = log.scrollHeight;
+}
+
+async function sendAgentMessage() {
+  if (agentBusy) return;
+  const input = document.getElementById('ai-input');
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+  appendChatMsg('user', text);
+  agentHistory.push({ role:'user', content:text });
+  await runAgentLoop();
+}
+
+async function runAgentLoop() {
+  agentBusy = true;
+  document.getElementById('ai-send-btn').disabled = true;
+  const log = document.getElementById('ai-chat-log');
+  function showThinking() {
+    const el = document.createElement('div');
+    el.className = 'ai-msg system';
+    el.textContent = '● thinking…';
+    log.appendChild(el); log.scrollTop = log.scrollHeight;
+    return el;
+  }
+  let thinkingEl = showThinking();
+
+  const provider = document.getElementById('ai-provider-sel').value;
+  const model = document.getElementById('ai-model-input').value.trim();
+  if (!model) { thinkingEl.remove(); appendChatMsg('system', '⚠️ Type a model name in the settings bar first.'); agentBusy = false; document.getElementById('ai-send-btn').disabled = false; return; }
+  const systemPrompt = buildAgentSystemPrompt();
+
+  let iterations = 0;
+  try {
+    while (iterations++ < 12) {
+      const res = await api.ai.chatOnce({ provider, model, messages: agentHistory, tools: AGENT_TOOLS, systemPrompt });
+      thinkingEl.remove();
+      if (res.error) { appendChatMsg('system', '⚠️ ' + res.error); break; }
+
+      // Some local/older models (e.g. many Ollama models) don't reliably use
+      // structured function-calling — they print the call as JSON text instead.
+      // Detect that and treat it as a real tool call rather than showing raw JSON.
+      if ((!res.toolCalls || !res.toolCalls.length) && res.text) {
+        const parsed = extractToolCallFromText(res.text);
+        if (parsed) { res.toolCalls = [parsed]; res.text = parsed.leftoverText || ''; }
+      }
+
+      if (res.text || (res.toolCalls && res.toolCalls.length)) {
+        agentHistory.push({ role:'assistant', content: res.text || '', toolCalls: res.toolCalls || [] });
+        if (res.text) appendChatMsg('assistant', res.text);
+      }
+
+      if (!res.toolCalls || !res.toolCalls.length) break;
+
+      for (const call of res.toolCalls) {
+        const result = await execAgentTool(call.name, call.args);
+        appendToolCard(call.name, call.args, result);
+        agentHistory.push({ role:'tool', name: call.name, tool_call_id: call.id, content: JSON.stringify(result) });
+      }
+      if (iterations === 11) { appendChatMsg('system', '⚠️ Stopping after 12 steps — ask a follow-up to continue.'); break; }
+      thinkingEl = showThinking(); // model will react to the tool results next loop
+    }
+  } catch (e) {
+    thinkingEl?.remove();
+    appendChatMsg('system', '⚠️ ' + (e.message || e));
+  }
+  agentBusy = false;
+  document.getElementById('ai-send-btn').disabled = false;
+  saveHistoryToDisk();
+}
+
+// Best-effort: find a {"name":"...", "arguments"/"input":{...}} blob in free text
+// and treat it as the tool call the model intended. Handles fenced ```json blocks
+// too. Returns null if nothing tool-call-shaped is found.
+function extractToolCallFromText(text) {
+  const fenced = text.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+  const candidates = [];
+  if (fenced) candidates.push(fenced[1]);
+  const braceMatch = text.match(/\{[\s\S]*"name"\s*:\s*"[a-z_]+"[\s\S]*\}/i);
+  if (braceMatch) candidates.push(braceMatch[0]);
+  for (const c of candidates) {
+    try {
+      const obj = JSON.parse(c);
+      const name = obj.name || obj.tool || obj.function;
+      const args = obj.arguments || obj.args || obj.input || obj.parameters || {};
+      if (name && AGENT_TOOLS.some(t => t.name === name)) {
+        return { id: crypto.randomUUID(), name, args, leftoverText: text.replace(c, '').replace(/```json|```/g, '').trim() };
+      }
+    } catch { /* not valid JSON, ignore */ }
+  }
+  return null;
+}
+
+function buildAgentSystemPrompt() {
+  const memNote = agentMemoryContent ? `\n\nPersistent project notes (from .liteide/agent-memory.md — update this file with write_file whenever you learn something worth remembering about this project):\n${agentMemoryContent.slice(0, 3000)}` : `\n\nNo persistent notes yet. When you learn something durable about this project (conventions, gotchas, decisions), save it to .liteide/agent-memory.md with write_file so future sessions have it.`;
+  return `You are an autonomous coding agent embedded in LiteIDE, working inside the project folder "${currentFolder || '(none open)'}". Use tools to read files, search the codebase (RAG), edit/create files, and run commands. You can call spawn_subagents to delegate independent sub-tasks that run in parallel. Be concise. Always check real file contents via tools rather than assuming.${memNote}`;
+}
+
+// ── Approval modal ──────────────────────────────────────────────────────────
+let pendingApprovalId = null;
+function showApprovalModal(req) {
+  if (document.getElementById('ai-autoapprove').checked && req.action !== 'delete_file') {
+    api.agent.respondApproval(req.id, true);
+    appendToolCard(req.action, req.detail || {}, { ok:true, note:'auto-approved' });
+    return;
+  }
+  pendingApprovalId = req.id;
+  const titles = { write_file:'Write to critical file', delete_file:'Delete file', run_command:'Run risky command' };
+  document.getElementById('ac-title-text').textContent = titles[req.action] || 'Approval needed';
+  const detailText = req.detail?.path ? `Path: ${req.detail.path}` : req.detail?.command ? `Command: ${req.detail.command}` : '';
+  document.getElementById('ac-detail-text').textContent = detailText;
+  const preview = req.detail?.preview || req.detail?.command;
+  const pre = document.getElementById('ac-preview');
+  if (preview) { pre.style.display = 'block'; pre.textContent = preview; } else { pre.style.display = 'none'; }
+  document.getElementById('approval-overlay').classList.add('show');
+}
+function respondApproval(approved) {
+  if (!pendingApprovalId) return;
+  api.agent.respondApproval(pendingApprovalId, approved);
+  document.getElementById('approval-overlay').classList.remove('show');
+  pendingApprovalId = null;
+}
+
+// ═══════════════════════════════════════════
 //  KEYBOARD SHORTCUTS
 // ═══════════════════════════════════════════
+
 document.addEventListener('keydown', e => {
   const mod = platform === 'darwin' ? e.metaKey : e.ctrlKey;
   if (mod && e.key === 's') { e.preventDefault(); saveFile(); }
