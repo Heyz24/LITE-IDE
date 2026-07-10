@@ -1074,6 +1074,7 @@ const EXT_TO_LANG = {
   '.php':'PHP','.swift':'Swift','.kt':'Kotlin','.kts':'Kotlin',
   '.dart':'Dart','.r':'R','.R':'R','.pl':'Perl','.pm':'Perl',
   '.sh':'Bash','.ps1':'PowerShell','.lua':'Lua','.ex':'Elixir',
+  '.bat':'Batch', '.cmd':'Batch',
   '.exs':'Elixir','.hs':'Haskell','.zig':'Zig','.jl':'Julia','.nim':'Nim',
   '.cs':'C#','.fs':'F#','.fsx':'F#','.deno':'Deno',
   '.html':'HTML','.htm':'HTML','.xhtml':'HTML',
@@ -1087,18 +1088,23 @@ const EXT_TO_LANG = {
   '.vue':'Vue','.svelte':'Svelte',
   '.graphql':'GraphQL','.gql':'GraphQL',
   '.dockerfile':'Dockerfile',
+  '.vhd':'VHDL', '.vhdl':'VHDL',
+  '.sv':'SystemVerilog', '.svh':'SystemVerilog', '.v':'SystemVerilog',
+  '.ino':'Arduino', '.pde':'Arduino',
+  '.vcd':'GTKWave',
 };
 
 const MONACO_LANG = {
   Python:'python', JavaScript:'javascript', TypeScript:'typescript',
   'C++':'cpp', C:'c', Go:'go', Rust:'rust', Java:'java', Ruby:'ruby',
   PHP:'php', Swift:'swift', Kotlin:'kotlin', Dart:'dart', R:'r', Perl:'perl',
-  Bash:'shell', PowerShell:'powershell', Lua:'lua', Elixir:'elixir',
+  Bash:'shell', PowerShell:'powershell', Batch:'bat', Lua:'lua', Elixir:'elixir',
   Haskell:'haskell', Zig:'plaintext', Julia:'julia', Nim:'plaintext',
   'C#':'csharp', 'F#':'fsharp', Deno:'typescript',
   HTML:'html', Markdown:'markdown', CSS:'css', SCSS:'scss', LESS:'less',
   JSON:'json', XML:'xml', YAML:'yaml', TOML:'ini', INI:'ini', ENV:'ini',
   SQL:'sql', Vue:'html', Svelte:'html', GraphQL:'graphql', Dockerfile:'dockerfile',
+  VHDL:'plaintext', SystemVerilog:'plaintext', Arduino:'cpp', GTKWave:'plaintext',
 };
 
 // ═══════════════════════════════════════════
@@ -1750,8 +1756,11 @@ function getIcon(item) {
     '.rs':'🦀', '.go':'🐹', '.rb':'💎', '.php':'🐘', '.java':'☕',
     '.kt':'🎯', '.swift':'🍎', '.dart':'🎯', '.sh':'🐚', '.ps1':'💙',
     '.r':'📊', '.lua':'🌙', '.vue':'💚', '.svelte':'🔥', '.sql':'🗃️',
+    '.bat':'⬛', '.cmd':'⬛',
     '.yml':'📋', '.yaml':'📋', '.toml':'📋', '.env':'🔐', '.lock':'🔒',
     '.dockerfile':'🐳', '.gitignore':'👁️', '.zig':'⚡', '.jl':'🟣', '.nim':'👑',
+    '.vhd':'🔌', '.vhdl':'🔌', '.sv':'🧩', '.svh':'🧩', '.v':'🧩',
+    '.ino':'🔧', '.pde':'🔧', '.vcd':'📈',
   };
   return map[ext] || '📄';
 }
@@ -1892,7 +1901,7 @@ const LANG_LIST = [
   {name:'Swift',      icon:'🍎'}, {name:'Kotlin',     icon:'🎯'},
   {name:'Dart',       icon:'🎯'}, {name:'R',          icon:'📊'},
   {name:'Perl',       icon:'🐪'}, {name:'Bash',       icon:'🐚'},
-  {name:'PowerShell', icon:'💙'}, {name:'Lua',        icon:'🌙'},
+  {name:'PowerShell', icon:'💙'}, {name:'Batch',      icon:'⬛'}, {name:'Lua',        icon:'🌙'},
   {name:'Elixir',     icon:'💜'}, {name:'Haskell',    icon:'λ'},
   {name:'Zig',        icon:'⚡'}, {name:'Julia',      icon:'🟣'},
   {name:'Nim',        icon:'👑'}, {name:'C#',         icon:'🟦'},
@@ -1901,6 +1910,8 @@ const LANG_LIST = [
   {name:'Markdown',   icon:'📝'}, {name:'JSON',       icon:'{}'},
   {name:'SQL',        icon:'🗄️'}, {name:'Vue',        icon:'💚'},
   {name:'Svelte',     icon:'🔥'}, {name:'GraphQL',    icon:'💠'},
+  {name:'VHDL',       icon:'🔌'}, {name:'SystemVerilog', icon:'🧩'},
+  {name:'Arduino',    icon:'🔧'}, {name:'GTKWave',    icon:'📈'},
 ];
 
 // cache: name -> {installed, installLink}

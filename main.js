@@ -42,6 +42,7 @@ const LANGUAGES = {
   'Zig':        { cmds: ['zig'],                   type:'direct',  args:(f,c)=>[c,['run',f]] },
   'Nim':        { cmds: ['nim'],                   type:'direct',  args:(f,c)=>[c,['r',f]] },
   'PowerShell': { cmds: ['pwsh','powershell'],     type:'direct',  args:(f,c)=>[c,['-File',f]] },
+  'Batch':      { cmds: ['cmd'],                   type:'direct',  args:(f,c)=>[c,['/c',f]] },
   // Compiled — need shell pipeline
   'Rust':   { cmds:['rustc'],          type:'shell', run:(f,c)=> `${c} "${f}" -o "${f}.out" && "${f}.out"` },
   'C++':    { cmds:['g++','clang++'],  type:'shell', run:(f,c)=> `${c} "${f}" -o "${f}.out" && "${f}.out"` },
@@ -54,6 +55,11 @@ const LANGUAGES = {
   'Deno':   { cmds:['deno'],           type:'direct', args:(f,c)=>[c,['run',f]] },
   'HTML':   { cmds: [],                type:'browser', url:(f)=>f },
   'Markdown':{ cmds:[],               type:'browser', url:(f)=>f },
+  // Hardware description / embedded
+  'VHDL':          { cmds:['ghdl'],       type:'shell', run:(f,c)=>{ const u=path.basename(f).replace(/\.(vhd|vhdl)$/i,''); return `${c} -a --std=08 "${f}" && ${c} -e --std=08 ${u} && ${c} -r --std=08 ${u}`; } },
+  'SystemVerilog': { cmds:['iverilog'],   type:'shell', run:(f,c)=> `${c} -g2012 -o "${f}.out" "${f}" && vvp "${f}.out"` },
+  'Arduino':       { cmds:['arduino-cli'],type:'shell', run:(f,c)=> `${c} compile --fqbn arduino:avr:uno "${path.dirname(f)}"` },
+  'GTKWave':       { cmds:['gtkwave'],    type:'external' },
 };
 
 const INSTALL_LINKS = {
@@ -74,6 +80,7 @@ const INSTALL_LINKS = {
   'Perl':       { win:'https://strawberryperl.com/',               mac:'https://perl.org/',                         linux:'https://perl.org/' },
   'Bash':       { win:'https://git-scm.com/downloads',             mac:null,                                        linux:null },
   'PowerShell': { win:null,                                        mac:'https://github.com/PowerShell/PowerShell',  linux:'https://github.com/PowerShell/PowerShell' },
+  'Batch':      { win:null,                                        mac:null,                                        linux:null },
   'Lua':        { win:'https://lua.org/download.html',             mac:'https://lua.org/download.html',             linux:'https://lua.org/download.html' },
   'Elixir':     { win:'https://elixir-lang.org/install.html',      mac:'https://elixir-lang.org/install.html',      linux:'https://elixir-lang.org/install.html' },
   'Haskell':    { win:'https://www.haskell.org/ghcup/',            mac:'https://www.haskell.org/ghcup/',            linux:'https://www.haskell.org/ghcup/' },
@@ -83,6 +90,10 @@ const INSTALL_LINKS = {
   'C#':         { win:'https://dotnet.microsoft.com/download',         mac:'https://dotnet.microsoft.com/download',         linux:'https://dotnet.microsoft.com/download' },
   'F#':         { win:'https://dotnet.microsoft.com/download',         mac:'https://dotnet.microsoft.com/download',         linux:'https://dotnet.microsoft.com/download' },
   'Deno':       { win:'https://deno.com/',                             mac:'https://deno.com/',                             linux:'https://deno.com/' },
+  'VHDL':          { win:'https://ghdl.github.io/ghdl/',                  mac:'https://ghdl.github.io/ghdl/',                  linux:'https://ghdl.github.io/ghdl/' },
+  'SystemVerilog': { win:'https://bleyer.org/icarus/',                    mac:'https://formulae.brew.sh/formula/icarus-verilog',linux:'http://iverilog.icarus.com/' },
+  'Arduino':       { win:'https://arduino.github.io/arduino-cli/latest/installation/', mac:'https://arduino.github.io/arduino-cli/latest/installation/', linux:'https://arduino.github.io/arduino-cli/latest/installation/' },
+  'GTKWave':       { win:'https://gtkwave.sourceforge.net/',              mac:'https://formulae.brew.sh/formula/gtkwave',      linux:'https://gtkwave.sourceforge.net/' },
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -262,6 +273,19 @@ ipcMain.handle('code:run', async (_, filePath, langName) => {
     safeSend('process:error',
       `${langName} is not installed. Visit ${(INSTALL_LINKS[langName]||{})[(IS_WIN?'win':IS_MAC?'mac':'linux')] || 'the official website'} to install it.`);
     return false;
+  }
+
+  if (lang.type === 'external') {
+    try {
+      const child = spawn(cmd, [filePath], { detached: true, stdio: 'ignore' });
+      child.unref();
+      safeSend('process:stdout', `🔌 Launched ${langName}: ${filePath}\n`);
+      safeSend('process:exit', 0);
+    } catch (e) {
+      safeSend('process:error', e.message);
+      return false;
+    }
+    return true;
   }
 
   const cwd = path.dirname(filePath);

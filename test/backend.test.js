@@ -177,6 +177,22 @@ describe('Backend IPC handlers (real main.js code, mocked Electron only)', () =>
     assert.ok(openEvent, 'expected app:openPath to be sent with the double-clicked file path');
   });
 
+  test('lang:detect reports install status (not throwing) for the new HDL/embedded languages', async () => {
+    for (const lang of ['VHDL', 'SystemVerilog', 'Arduino', 'GTKWave']) {
+      const result = await mock.handleFns.get('lang:detect')(EVT, lang);
+      assert.equal(typeof result.installed, 'boolean', `lang:detect('${lang}') must return {installed: boolean}`);
+    }
+  });
+
+  test('code:run reports a clear "not installed" error for GTKWave rather than crashing, when the tool is absent', async () => {
+    const vcdFile = path.join(projectDir, 'wave.vcd');
+    fs.writeFileSync(vcdFile, '$date today $end');
+    // Whether or not gtkwave is actually installed on the test machine, this must not throw.
+    await assert.doesNotReject(async () => {
+      await mock.handleFns.get('code:run')(EVT, vcdFile, 'GTKWave');
+    });
+  });
+
   test('shell:getAvailable returns an array (system shell auto-detection runs without throwing)', async () => {
     const result = await mock.handleFns.get('shell:getAvailable')(EVT);
     assert.ok(Array.isArray(result));
