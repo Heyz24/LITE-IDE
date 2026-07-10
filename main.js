@@ -106,8 +106,8 @@ function findCmd(cmds) {
 // parent folder as the project (so Explorer/search/git/agent all work) and
 // the file itself in a tab.
 function extractLaunchFilePath(argv) {
-  for (const arg of argv) {
-    if (arg.startsWith('-') || arg === '.' || /electron(\.exe)?$/i.test(arg) || arg.endsWith('main.js')) continue;
+  for (const arg of argv.slice(1)) { // argv[0] is always the exe itself (dev or packaged) — never a launched file
+    if (!arg || arg.startsWith('-') || arg === '.' || /electron(\.exe)?$/i.test(arg) || arg.endsWith('main.js')) continue;
     try { if (fs.existsSync(arg) && fs.statSync(arg).isFile()) return path.resolve(arg); } catch {}
   }
   return null;
@@ -368,22 +368,32 @@ ipcMain.handle('term:create', async (_, sessionId, shellCmd) => {
   }
 
   let proc, isPty = !!pty;
-  const cwd = projectRoot || os.homedir();
-  if (pty) {
-    const shellArgs = IS_WIN ? [] : ['--login'];
-    proc = pty.spawn(resolvedCmd, shellArgs, {
-      name: 'xterm-256color', cols: 120, rows: 30, cwd,
-      env: { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor', PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' },
-    });
-    proc.onData(data => safeSend('term:output', { id: sessionId, data }));
-    proc.onExit(() => { safeSend('term:exit', { id: sessionId }); termSessions.delete(sessionId); });
-  } else {
-    const shellArgs = IS_WIN ? [] : ['--login'];
-    proc = spawn(resolvedCmd, shellArgs, { env: { ...process.env, TERM: 'dumb' }, cwd });
-    proc.stdout.on('data', d => safeSend('term:output', { id: sessionId, data: d.toString() }));
-    proc.stderr.on('data', d => safeSend('term:output', { id: sessionId, data: d.toString() }));
-    proc.on('close', () => { safeSend('term:exit', { id: sessionId }); termSessions.delete(sessionId); });
-    proc.on('error', e => { safeSend('term:error', { id: sessionId, msg: e.message }); termSessions.delete(sessionId); });
+  const cwd = fs.existsSync(projectRoot || '') ? projectRoot : os.homedir(); // never spawn with a stale/missing cwd
+  try {
+    if (pty) {
+      const shellArgs = IS_WIN ? [] : ['--login'];
+      proc = pty.spawn(resolvedCmd, shellArgs, {
+        name: 'xterm-256color', cols: 120, rows: 30, cwd,
+        env: { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor', PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' },
+      });
+      proc.onData(data => safeSend('term:output', { id: sessionId, data }));
+      proc.onExit(({ exitCode, signal }) => {
+        safeSend('term:exit', { id: sessionId, exitCode, signal });
+        termSessions.delete(sessionId);
+      });
+    } else {
+      const shellArgs = IS_WIN ? [] : ['--login'];
+      proc = spawn(resolvedCmd, shellArgs, { env: { ...process.env, TERM: 'dumb' }, cwd });
+      proc.stdout.on('data', d => safeSend('term:output', { id: sessionId, data: d.toString() }));
+      proc.stderr.on('data', d => safeSend('term:output', { id: sessionId, data: d.toString() }));
+      proc.on('close', () => { safeSend('term:exit', { id: sessionId }); termSessions.delete(sessionId); });
+      proc.on('error', e => { safeSend('term:error', { id: sessionId, msg: e.message }); termSessions.delete(sessionId); });
+    }
+  } catch (e) {
+    // This is the fix: pty.spawn() can throw SYNCHRONOUSLY (bad shell path, WSL
+    // not installed/no default distro, ConPTY init failure, etc). Previously
+    // this was uncaught — the tab appeared but nothing ever loaded, silently.
+    return { ok: false, error: `Could not start "${resolvedCmd}": ${e.message}` };
   }
   termSessions.set(sessionId, { proc, isPty, shellCmd: resolvedCmd });
   return { ok: true, hasPty: isPty, shellCmd: resolvedCmd };
@@ -395,12 +405,22 @@ ipcMain.on('term:input', (_, sessionId, data) => {
   if (s.isPty && typeof s.proc.write === 'function') s.proc.write(data);
   else if (s.proc.stdin) s.proc.stdin.write(data);
 });
+function winPathToWslPath(winPath) {
+  const m = /^([A-Za-z]):[\\/](.*)$/.exec(winPath || '');
+  if (!m) return (winPath || '').replace(/\\/g, '/'); // already unix-like or unrecognized — best effort
+  return `/mnt/${m[1].toLowerCase()}/${m[2].replace(/\\/g, '/')}`;
+}
+function buildCdCommand(shellCmd, dir) {
+  if (/wsl(\.exe)?$/i.test(shellCmd || '')) return `cd "${winPathToWslPath(dir)}"\r`;
+  const isCmd = /(^|[\\/])cmd(\.exe)?$/i.test(shellCmd || '');
+  return isCmd ? `cd /d "${dir}"\r` : `cd "${dir}"\r`;
+}
 ipcMain.on('term:cd', (_, sessionId, dir) => {
   const s = termSessions.get(sessionId);
   if (!s) return;
-  const cmd = `cd "${dir}"\r`;
+  const cmd = buildCdCommand(s.shellCmd, dir);
   if (s.isPty && typeof s.proc.write === 'function') s.proc.write(cmd);
-  else if (s.proc.stdin) s.proc.stdin.write(cmd + '\n');
+  else if (s.proc.stdin) s.proc.stdin.write(cmd);
 });
 ipcMain.on('term:resize', (_, sessionId, cols, rows) => {
   const s = termSessions.get(sessionId);
@@ -924,3 +944,5 @@ ipcMain.handle('agent:ragSearch', async (_, query, topK = 8) => {
 ipcMain.on('open:external',    (_, url) => shell.openExternal(url));
 ipcMain.handle('app:platform', ()       => process.platform);
 ipcMain.handle('app:homedir',  ()       => os.homedir());
+
+module.exports = { buildCdCommand, extractLaunchFilePath, isCriticalFile, isCriticalCommand, winPathToWslPath };

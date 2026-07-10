@@ -10,7 +10,7 @@
     "dev": "electron . --dev",
     "dist": "node build.js",
     "postinstall": "electron-builder install-app-deps",
-    "test": "node --test test/wiring.test.js test/backend.test.js test/ai-providers.test.js"
+    "test": "node --test test/wiring.test.js test/backend.test.js test/ai-providers.test.js test/terminal.test.js"
   },
 
   "build": {

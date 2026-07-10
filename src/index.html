@@ -523,7 +523,18 @@ html, body {
   -webkit-backdrop-filter: var(--blur);
   border-top:1px solid var(--glass-b);
   position:relative;
+  min-height:110px; max-height:78vh;
 }
+#app.term-hidden { grid-template-rows: var(--titlebar-h) 1fr 0px !important; }
+#term-area.hidden { display:none; }
+#term-restore-btn {
+  display:none; position:fixed; bottom:14px; right:20px; z-index:40;
+  background:rgba(20,18,30,0.9); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px);
+  border:1px solid var(--glass-b); border-radius:999px; color:var(--t2);
+  font-size:11.5px; padding:6px 14px; cursor:pointer; box-shadow:0 8px 24px rgba(0,0,0,.4);
+}
+#term-restore-btn.show { display:block; }
+#term-restore-btn:hover { color:var(--t1); border-color:var(--blue); }
 
 /* resize handle */
 #term-resize {
@@ -990,6 +1001,9 @@ html, body {
     <div id="term-header">
       <div class="term-tabs" id="term-tabs"></div>
       <div class="term-right">
+        <button class="ib" onclick="reconnectFocusedTerm()" title="Reconnect (if a terminal stops responding, e.g. CMD not loading)">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M9.5 3A4 4 0 102.7 5.5"/><path d="M9.5 1v3h-3"/></svg>
+        </button>
         <button class="ib" id="term-split-btn" onclick="toggleTermSplit()" title="Split terminal">
           <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="1" y="1" width="12" height="12" rx="1.5"/><path d="M7 1v12"/></svg>
         </button>
@@ -1003,6 +1017,9 @@ html, body {
             <path d="M6 1v10M1 6h10"/>
           </svg>
         </button>
+        <button class="ib" onclick="toggleTerminalPanel()" title="Hide terminal (Ctrl+`)">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M2.5 4.5L6 8l3.5-3.5"/></svg>
+        </button>
       </div>
     </div>
     <div id="term-body">
@@ -1010,6 +1027,7 @@ html, body {
       <div class="term-pane" id="term-pane-right"></div>
     </div>
   </div>
+  <button id="term-restore-btn" onclick="toggleTerminalPanel()" title="Show terminal (Ctrl+`)">▲ Terminal</button>
 
   <!-- ══ NEW SHELL PICKER ══ -->
   <div id="shell-picker-overlay">
@@ -1319,8 +1337,15 @@ async function createShellTerminal(shellCmd, displayName) {
   wireCommonTermBehaviors(entry);
   term.onData(data => sendToTerminal(id, data));
 
-  const r = await api.termCreate(id, shellCmd);
-  if (!r.ok) { term.write(`\r\n\x1b[31m[Failed to start shell: ${r.error}]\x1b[0m\r\n`); return entry; }
+  let r;
+  try {
+    r = await api.termCreate(id, shellCmd);
+  } catch (e) {
+    term.write(`\r\n\x1b[31m[Failed to start shell: ${e.message || e}]\x1b[0m\r\n`);
+    renderTermTabs();
+    return entry;
+  }
+  if (!r.ok) { term.write(`\r\n\x1b[31m[Failed to start shell: ${r.error}]\x1b[0m\r\n`); renderTermTabs(); return entry; }
   entry.hasPty = r.hasPty;
   entry.shellCmd = r.shellCmd;
   entry.name = displayName || (r.shellCmd.split(/[/\\]/).pop());
@@ -1483,6 +1508,33 @@ function clearFocusedTerm() {
   if (t) t.term.clear();
 }
 
+// Kills and respawns the focused/left shell session — fixes "terminal stuck /
+// not responding" (e.g. CMD after a cd that silently failed, or a hung process)
+// without losing your other open sessions.
+async function reconnectFocusedTerm() {
+  const id = (terminals.get(focusedTermId)?.kind === 'shell') ? focusedTermId : leftTermId;
+  const t = terminals.get(id);
+  if (!t || t.kind !== 'shell') { toast('⚠️ Select a shell tab first (not Output)'); return; }
+  t.term.clear();
+  t.term.write('\x1b[33m[Reconnecting…]\x1b[0m\r\n');
+  let r;
+  try { r = await api.termCreate(id, t.shellCmd); }
+  catch (e) { t.term.write(`\x1b[31m[Failed: ${e.message || e}]\x1b[0m\r\n`); return; }
+  if (!r.ok) { t.term.write(`\x1b[31m[Failed: ${r.error}]\x1b[0m\r\n`); return; }
+  t.hasPty = r.hasPty;
+  t.term.write(`\x1b[36;1mLiteIDE\x1b[0m \x1b[2m— reconnected to ${t.name}\x1b[0m\r\n`);
+  if (currentFolder) setTimeout(() => api.termCd(id, currentFolder), 500);
+}
+
+let terminalPanelHidden = false;
+function toggleTerminalPanel() {
+  terminalPanelHidden = !terminalPanelHidden;
+  document.getElementById('app').classList.toggle('term-hidden', terminalPanelHidden);
+  document.getElementById('term-area').classList.toggle('hidden', terminalPanelHidden);
+  document.getElementById('term-restore-btn').classList.toggle('show', terminalPanelHidden);
+  if (!terminalPanelHidden) requestAnimationFrame(renderTermPanes); // re-fit xterm after becoming visible again
+}
+
 async function closeShellTerminal(id) {
   if (id === 'output') return; // Output is permanent
   api.termClose(id);
@@ -1571,7 +1623,12 @@ function showTermContextMenu(x, y, selection, termId) {
 function initTerminalSystem() {
   createOutputTerminal();
   api.onTermOutput(({ id, data }) => { const t = terminals.get(id); if (t) t.term.write(data); });
-  api.onTermExit(({ id }) => { const t = terminals.get(id); if (t) t.term.write('\r\n\x1b[33m[Shell exited]\x1b[0m\r\n'); });
+  api.onTermExit(({ id, exitCode, signal }) => {
+    const t = terminals.get(id);
+    if (!t) return;
+    const detail = exitCode !== undefined ? ` (exit code ${exitCode}${signal ? `, signal ${signal}` : ''})` : '';
+    t.term.write(`\r\n\x1b[33m[Shell exited${detail}]\x1b[0m\r\n`);
+  });
   api.onTermError(({ id, msg }) => { const t = terminals.get(id); if (t) t.term.write(`\r\n\x1b[31m[Shell error: ${msg}]\x1b[0m\r\n`); });
 
   api.onStdout(data => { const t = terminals.get('output'); if (t) t.term.write(data); });
@@ -2795,6 +2852,7 @@ document.addEventListener('keydown', e => {
   if (mod && e.key === 'o') { e.preventDefault(); openFolder(); }
   if (mod && e.key === 'Enter') { e.preventDefault(); toggleRun(); }
   if (mod && e.key === 'w') { e.preventDefault(); if (activeTab) closeTab(activeTab.path); }
+  if (mod && e.key === '`') { e.preventDefault(); toggleTerminalPanel(); }
   if (e.key === 'Escape') hideCtxMenu();
 });
 

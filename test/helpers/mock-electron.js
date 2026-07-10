@@ -76,13 +76,14 @@ function loadMainWithMockElectron(mainPath) {
   };
 
   delete require.cache[require.resolve(mainPath)];
+  let moduleExports;
   try {
-    require(mainPath);
+    moduleExports = require(mainPath);
   } finally {
     Module._load = originalLoad; // only intercept during this one require
   }
 
-  return mock;
+  return { ...mock, exports: moduleExports };
 }
 
 module.exports = { createMockElectron, loadMainWithMockElectron };
