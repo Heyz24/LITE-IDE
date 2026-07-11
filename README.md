@@ -51,7 +51,7 @@ npm run dist
 
 Auto-detects your OS + CPU arch. Output in `dist\`:
 - `LiteIDE Setup.exe` — NSIS installer
-- `LiteIDE 1.0.0.msi` — MSI installer
+- `LiteIDE 1.1.0.msi` — MSI installer
 - `LiteIDE.exe` — portable (no install needed)
 
 ---

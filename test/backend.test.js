@@ -193,6 +193,76 @@ describe('Backend IPC handlers (real main.js code, mocked Electron only)', () =>
     });
   });
 
+  test('agent:editFile makes a precise targeted replacement without touching the rest of the file', async () => {
+    fs.writeFileSync(path.join(projectDir, 'edit.py'), 'def add(a, b):\n    return a + b\n\ndef sub(a, b):\n    return a - b\n');
+    const result = await mock.handleFns.get('agent:editFile')(EVT, 'edit.py', 'def add(a, b):\n    return a + b', 'def add(a, b):\n    return a + b  # fixed');
+    assert.equal(result.ok, true);
+    const content = fs.readFileSync(path.join(projectDir, 'edit.py'), 'utf8');
+    assert.match(content, /# fixed/);
+    assert.match(content, /def sub\(a, b\):/); // untouched
+  });
+
+  test('agent:editFile refuses an ambiguous old_str (appears more than once)', async () => {
+    fs.writeFileSync(path.join(projectDir, 'dup.py'), 'x = 1\nx = 1\n');
+    const result = await mock.handleFns.get('agent:editFile')(EVT, 'dup.py', 'x = 1', 'x = 2');
+    assert.equal(result.ok, false);
+    assert.match(result.error, /appears 2 times/);
+  });
+
+  test('agent:editFile fails clearly when old_str is not found at all', async () => {
+    fs.writeFileSync(path.join(projectDir, 'nf.py'), 'y = 1\n');
+    const result = await mock.handleFns.get('agent:editFile')(EVT, 'nf.py', 'not_in_file', 'x');
+    assert.equal(result.ok, false);
+    assert.match(result.error, /not found/);
+  });
+
+  test('agent:editFile on a critical file (.env) requires approval', async () => {
+    fs.writeFileSync(path.join(projectDir, '.env'), 'SECRET=old');
+    const pending = mock.handleFns.get('agent:editFile')(EVT, '.env', 'SECRET=old', 'SECRET=new');
+    await new Promise(r => setTimeout(r, 10));
+    const approvalEvent = mock.sent.filter(e => e.channel === 'agent:approvalRequest').at(-1);
+    assert.equal(approvalEvent.payload.action, 'write_file');
+    mock.onFns.get('agent:approvalResponse')[0](EVT, { id: approvalEvent.payload.id, approved: true });
+    const result = await pending;
+    assert.equal(result.ok, true);
+    assert.equal(fs.readFileSync(path.join(projectDir, '.env'), 'utf8'), 'SECRET=new');
+  });
+
+  test('agent:saveSkill / agent:listSkills / agent:deleteSkill round-trip', async () => {
+    const save = await mock.handleFns.get('agent:saveSkill')(EVT, 'my skill!', '# My Skill\nDo things carefully.');
+    assert.equal(save.ok, true);
+    assert.equal(save.name, 'my_skill_.md'); // sanitized
+
+    const list = await mock.handleFns.get('agent:listSkills')(EVT);
+    const mine = list.find(s => s.name === 'my_skill_.md');
+    assert.ok(mine, 'saved skill should appear in the list');
+    assert.equal(mine.description, 'My Skill');
+    assert.equal(mine.path, '.liteide/skills/my_skill_.md');
+
+    const del = await mock.handleFns.get('agent:deleteSkill')(EVT, 'my_skill_.md');
+    assert.equal(del.ok, true);
+    const list2 = await mock.handleFns.get('agent:listSkills')(EVT);
+    assert.ok(!list2.some(s => s.name === 'my_skill_.md'));
+  });
+
+  test('the universal coding-agent skill is auto-seeded into every project on setProjectRoot', async () => {
+    // Explicit, self-contained re-seed, then poll rather than assert instantly.
+    // On some Windows machines, antivirus real-time scanning of newly-created
+    // files under the Temp folder can introduce a brief filesystem visibility
+    // lag even after a synchronous fs.writeFileSync call returns — this is a
+    // known Node-on-Windows quirk, not a bug in the seeding logic itself.
+    await mock.handleFns.get('agent:setProjectRoot')(EVT, projectDir);
+    let universal = null;
+    for (let attempt = 0; attempt < 20 && !universal; attempt++) {
+      const list = await mock.handleFns.get('agent:listSkills')(EVT);
+      universal = list.find(s => s.name === 'universal-coding-agent.md') || null;
+      if (!universal) await new Promise(r => setTimeout(r, 50));
+    }
+    assert.ok(universal, 'universal-coding-agent.md should be auto-seeded (waited up to 1s for filesystem visibility)');
+    const r = await mock.handleFns.get('agent:readFile')(EVT, universal.path);
+    assert.match(r.content, /v1\.1\.0/);
+  });
+
   test('shell:getAvailable returns an array (system shell auto-detection runs without throwing)', async () => {
     const result = await mock.handleFns.get('shell:getAvailable')(EVT);
     assert.ok(Array.isArray(result));

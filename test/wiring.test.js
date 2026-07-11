@@ -56,6 +56,32 @@ describe('Renderer HTML static integrity (src/index.html)', () => {
   const scriptMatch = html.match(/<script>([\s\S]*)<\/script>/);
   const inlineScript = scriptMatch ? scriptMatch[1] : '';
 
+  test('every modal overlay has an explicit display:none base rule (catches orphaned/malformed CSS selectors that leave a modal visible on load)', () => {
+    const overlayIds = ['approval-overlay', 'skills-overlay', 'diff-overlay', 'shell-picker-overlay'];
+    const cssMatch = html.match(/<style>([\s\S]*?)<\/style>/);
+    assert.ok(cssMatch, '<style> block not found');
+    const css = cssMatch[1];
+    for (const id of overlayIds) {
+      const rule = new RegExp(`#${id}\\s*\\{[^}]*display:\\s*none`, 'i');
+      assert.match(css, rule, `#${id} must have its own "display:none" rule — if this fails, that overlay is likely rendering visible on every page load`);
+    }
+  });
+
+  test('no orphaned CSS declaration blocks (a stray "}" ending a previous rule immediately followed by bare declarations with no selector)', () => {
+    const cssMatch = html.match(/<style>([\s\S]*?)<\/style>/);
+    const css = cssMatch[1];
+    // A line starting with a CSS property (word-then-colon) immediately after a "}" on the previous
+    // meaningful line, with no selector in between, indicates a dropped selector line.
+    const lines = css.split('\n').map(l => l.trim()).filter(Boolean);
+    const orphans = [];
+    for (let i = 1; i < lines.length; i++) {
+      const prev = lines[i - 1];
+      const cur = lines[i];
+      if (prev === '}' && /^[a-z-]+\s*:/.test(cur)) orphans.push(cur.slice(0, 40));
+    }
+    assert.deepEqual(orphans, [], `orphaned CSS declarations (missing selector) found: ${orphans.join(' | ')}`);
+  });
+
   test('inline <script> is syntactically valid JavaScript', () => {
     assert.doesNotThrow(() => new Function(inlineScript), 'inline script has a syntax error');
   });
@@ -87,6 +113,37 @@ describe('Renderer HTML static integrity (src/index.html)', () => {
       const closes = (html.match(new RegExp(`</${tag}>`, 'g')) || []).length;
       assert.equal(opens, closes, `<${tag}> mismatch: ${opens} open vs ${closes} close`);
     }
+  });
+
+  test('no file paths are interpolated into inline onclick attributes (backslashes in Windows paths corrupt via JS escape sequences like \\t \\n \\r)', () => {
+    const risky = [...inlineScript.matchAll(/onclick="[a-zA-Z_]+\('\$\{[^}]*\.path[^}]*\}/g)];
+    assert.deepEqual(risky.map(m => m[0]), [], 'a file/item .path was interpolated directly into an onclick string attribute — use addEventListener + closure instead');
+  });
+
+  test('assistant chat messages have a working copy-to-clipboard button', () => {
+    assert.match(inlineScript, /ai-msg-copy/);
+    assert.match(inlineScript, /navigator\.clipboard\.writeText\(text\)/);
+  });
+
+  test('every AGENT_TOOLS entry has a matching case in execAgentTool, and vice versa', () => {
+    const toolsMatch = inlineScript.match(/const AGENT_TOOLS = \[([\s\S]*?)\n\];/);
+    assert.ok(toolsMatch, 'AGENT_TOOLS array not found');
+    const declared = [...toolsMatch[1].matchAll(/name:\s*'([a-z_]+)'/g)].map(m => m[1]);
+    assert.ok(declared.length >= 8, 'expected at least 8 agent tools declared');
+
+    const execMatch = inlineScript.match(/async function execAgentTool\(name, args\) \{([\s\S]*?)\n\}/);
+    assert.ok(execMatch, 'execAgentTool not found');
+    const implemented = [...execMatch[1].matchAll(/case\s+'([a-z_]+)'/g)].map(m => m[1]);
+
+    const missingImpl = declared.filter(t => !implemented.includes(t));
+    const orphanImpl = implemented.filter(t => !declared.includes(t));
+    assert.deepEqual(missingImpl, [], `tools declared but not implemented: ${missingImpl.join(', ')}`);
+    assert.deepEqual(orphanImpl, [], `tools implemented but not declared (model will never call them): ${orphanImpl.join(', ')}`);
+  });
+
+  test('run_in_terminal and run_command are both present (background vs live-visible execution)', () => {
+    assert.match(inlineScript, /name:\s*'run_command'/);
+    assert.match(inlineScript, /name:\s*'run_in_terminal'/);
   });
 
   test('no leftover references to the pre-refactor single-terminal API', () => {

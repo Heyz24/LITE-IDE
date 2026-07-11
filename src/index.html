@@ -723,7 +723,18 @@ html, body {
 .ai-msg.assistant {
   align-self:flex-start; background:var(--glass-hi); border:1px solid var(--glass-b);
   border-top-color:var(--glass-b-top); backdrop-filter:blur(20px); color:var(--t1); border-bottom-left-radius:4px;
+  position:relative; padding-right:30px;
 }
+.ai-msg-body { white-space:pre-wrap; word-break:break-word; }
+.ai-msg-copy {
+  position:absolute; top:6px; right:6px; width:22px; height:22px; border-radius:6px;
+  background:rgba(255,255,255,.06); border:1px solid transparent; color:var(--t3);
+  display:flex; align-items:center; justify-content:center; cursor:pointer;
+  opacity:0; transition:opacity .15s, background .15s, color .15s;
+}
+.ai-msg.assistant:hover .ai-msg-copy { opacity:1; }
+.ai-msg-copy:hover { background:var(--glass-hi2); color:var(--t1); }
+.ai-msg-copy.copied { opacity:1; color:var(--green); background:rgba(48,209,88,.12); }
 .ai-msg.system { align-self:center; color:var(--t3); font-size:11px; background:none; padding:2px 8px; }
 .ai-tool-card {
   align-self:flex-start; max-width:92%; font-size:11.5px; font-family:'JetBrains Mono',monospace;
@@ -734,6 +745,9 @@ html, body {
 .ai-tool-card pre { white-space:pre-wrap; word-break:break-word; margin-top:4px; max-height:160px; overflow-y:auto; color:var(--t2); }
 .ai-tool-card.denied { border-color:rgba(255,69,58,.35); background:rgba(255,69,58,.06); }
 .ai-tool-card.denied .th { color:var(--red); }
+.ai-tool-card.pending { border-color:rgba(255,159,10,.4); background:rgba(255,159,10,.06); }
+.ai-tool-card.pending .th { color:var(--orange); }
+.ai-tool-card .args { margin-top:2px; }
 
 #ai-input-row {
   display:flex; gap:8px; padding:10px 12px; border-top:1px solid var(--glass-b);
@@ -753,6 +767,33 @@ html, body {
 #ai-thinking { align-self:flex-start; font-size:11px; color:var(--t3); font-style:italic; padding:2px 4px; }
 
 /* Approval modal */
+#skills-overlay {
+  display:none; position:fixed; inset:0; z-index:100;
+  background:rgba(0,0,0,0.45); align-items:center; justify-content:center;
+}
+#skills-overlay.show { display:flex; }
+#skills-card {
+  width:480px; max-width:90vw; max-height:82vh; overflow-y:auto; border-radius:16px;
+  background:rgba(20,18,30,0.85); backdrop-filter:blur(32px) saturate(200%);
+  -webkit-backdrop-filter:blur(32px) saturate(200%);
+  border:1px solid var(--glass-b); border-top-color:var(--glass-b-top);
+  box-shadow:0 20px 60px rgba(0,0,0,0.5); padding:20px;
+}
+#skills-list { margin:10px 0; display:flex; flex-direction:column; gap:6px; }
+.skill-row {
+  display:flex; align-items:center; gap:8px; padding:7px 10px; border-radius:8px;
+  background:var(--glass-hi); border:1px solid var(--glass-b); font-size:12px; color:var(--t2);
+}
+.skill-row .sk-name { font-weight:600; color:var(--t1); }
+.skill-row .sk-desc { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--t3); }
+.skill-row .sk-del { color:var(--t3); cursor:pointer; flex-shrink:0; }
+.skill-row .sk-del:hover { color:var(--red); }
+#skill-content-input {
+  width:100%; background:var(--glass-hi); border:1px solid var(--glass-b); border-radius:var(--r-sm);
+  color:var(--t1); font-family:'JetBrains Mono',monospace; font-size:11.5px; padding:9px 12px;
+  outline:none; resize:vertical; margin-top:6px;
+}
+#skill-content-input:focus { border-color:var(--purple); }
 #approval-overlay {
   display:none; position:fixed; inset:0; z-index:100;
   background:rgba(0,0,0,0.45); align-items:center; justify-content:center;
@@ -966,6 +1007,7 @@ html, body {
         <div class="ai-settings-row">
           <button class="ai-save-btn" onclick="testAiConnection()" title="Send a tiny test message to confirm the key + model work">Test</button>
           <button class="ai-save-btn" onclick="runAgentSelfTest()" title="Exercise read/write/run tools end-to-end">Self-Test Tools</button>
+          <button class="ai-save-btn" onclick="openSkillsModal()" title="Add a markdown skill file — best practices the agent reads before matching tasks">+ Skill</button>
           <label class="ai-autoapprove-label">
             <input type="checkbox" id="ai-autoapprove" style="accent-color:var(--purple)"> Auto-approve non-critical
           </label>
@@ -983,6 +1025,20 @@ html, body {
   </div>
 
   <!-- ══ APPROVAL MODAL ══ -->
+  <div id="skills-overlay">
+    <div id="skills-card">
+      <div class="ac-title">📚 <span>Agent Skills</span></div>
+      <div class="ac-detail">Markdown files the agent reads before matching tasks — same idea as a style guide or runbook. Saved to <code>.liteide/skills/</code> in this project.</div>
+      <div id="skills-list"></div>
+      <input id="skill-name-input" class="sp-input" placeholder="Skill name, e.g. 'react-conventions'" autocomplete="off">
+      <textarea id="skill-content-input" placeholder="# React Conventions&#10;&#10;- Use functional components only&#10;- ..." rows="8"></textarea>
+      <div class="ac-btns">
+        <button class="ac-btn deny" onclick="closeSkillsModal()">Close</button>
+        <button class="ac-btn allow" onclick="saveSkillFromModal()">Save Skill</button>
+      </div>
+    </div>
+  </div>
+
   <div id="approval-overlay">
     <div id="approval-card">
       <div class="ac-title">⚠️ <span id="ac-title-text">Approval needed</span></div>
@@ -1688,7 +1744,7 @@ async function openFolder() {
   await refreshTree();
   toast('📂 ' + p.split(/[/\\]/).pop());
   cdShellTo(p);
-  if (agentInitDone) { await loadAgentMemory(); await loadPersistedHistory(); }
+  if (agentInitDone) { await loadAgentMemory(); await loadAgentSkills(); await loadPersistedHistory(); }
   refreshGitStatus();
 }
 
@@ -2141,16 +2197,22 @@ function showCtxMenu(e, item) {
   const menu = document.getElementById('ctx-menu');
   const rel = toProjectRelPath(item.path);
   const hasGitChange = rel && gitStatusMap[rel];
-  menu.innerHTML = `
-    <div class="ctx-item" onclick="openFile('${item.path.replace(/'/g,"\\'")}','${item.name.replace(/'/g,"\\'")}')">
-      <span>📂</span> Open
-    </div>
-    ${hasGitChange ? `<div class="ctx-item" onclick="openDiffModal('${item.path.replace(/'/g,"\\'")}','${item.name.replace(/'/g,"\\'")}')"><span>🔀</span> View Git Diff</div>` : ''}
-    <div class="ctx-sep"></div>
-    <div class="ctx-item danger" onclick="deleteFileCtx('${item.path.replace(/'/g,"\\'")}')">
-      <span>🗑️</span> Delete
-    </div>
-  `;
+  menu.innerHTML = '';
+
+  function addItem(icon, label, danger, onClick) {
+    const el = document.createElement('div');
+    el.className = 'ctx-item' + (danger ? ' danger' : '');
+    el.innerHTML = `<span>${icon}</span> `;
+    el.appendChild(document.createTextNode(label));
+    el.addEventListener('click', onClick); // item.path passed via closure — never serialized into a string, so no escaping bugs possible
+    menu.appendChild(el);
+  }
+
+  addItem('📂', 'Open', false, () => openFile(item.path, item.name));
+  if (hasGitChange) addItem('🔀', 'View Git Diff', false, () => openDiffModal(item.path, item.name));
+  const sep = document.createElement('div'); sep.className = 'ctx-sep'; menu.appendChild(sep);
+  addItem('🗑️', 'Delete', true, () => deleteFileCtx(item.path));
+
   menu.style.left = e.clientX + 'px';
   menu.style.top  = e.clientY + 'px';
   menu.classList.add('show');
@@ -2254,6 +2316,50 @@ function guessLangFromName(name) {
 function closeDiffModal() {
   document.getElementById('diff-overlay').classList.remove('show');
 }
+
+async function openSkillsModal() {
+  if (!currentFolder) { toast('⚠️ Open a project folder first'); return; }
+  await loadAgentSkills();
+  renderSkillsList();
+  document.getElementById('skill-name-input').value = '';
+  document.getElementById('skill-content-input').value = '';
+  document.getElementById('skills-overlay').classList.add('show');
+}
+function closeSkillsModal() { document.getElementById('skills-overlay').classList.remove('show'); }
+
+function renderSkillsList() {
+  const list = document.getElementById('skills-list');
+  list.innerHTML = '';
+  if (!agentSkills.length) { list.innerHTML = '<div style="font-size:11.5px;color:var(--t3)">No skills yet — add one below.</div>'; return; }
+  for (const s of agentSkills) {
+    const row = document.createElement('div');
+    row.className = 'skill-row';
+    row.innerHTML = `<span class="sk-name"></span><span class="sk-desc"></span><span class="sk-del" title="Delete skill">🗑️</span>`;
+    row.querySelector('.sk-name').textContent = s.name.replace(/\.md$/i, '');
+    row.querySelector('.sk-desc').textContent = s.description;
+    row.querySelector('.sk-del').addEventListener('click', async () => {
+      await api.agent.deleteSkill(s.name);
+      await loadAgentSkills();
+      renderSkillsList();
+      toast('🗑️ Skill removed');
+    });
+    list.appendChild(row);
+  }
+}
+
+async function saveSkillFromModal() {
+  const name = document.getElementById('skill-name-input').value.trim();
+  const content = document.getElementById('skill-content-input').value.trim();
+  if (!name || !content) { toast('⚠️ Give the skill a name and some content'); return; }
+  const r = await api.agent.saveSkill(name, content);
+  if (!r.ok) { toast('⚠️ ' + r.error); return; }
+  await loadAgentSkills();
+  renderSkillsList();
+  document.getElementById('skill-name-input').value = '';
+  document.getElementById('skill-content-input').value = '';
+  toast('✨ Skill saved — the agent will read it when relevant');
+}
+
 
 // ═══════════════════════════════════════════
 //  SIDEBAR: PROJECT SEARCH & REPLACE
@@ -2481,6 +2587,7 @@ async function initAgentSettings() {
   });
 
   await loadAgentMemory();
+  await loadAgentSkills();
   await loadPersistedHistory();
 }
 
@@ -2579,11 +2686,15 @@ const AGENT_TOOLS = [
     parameters: { type:'object', properties:{ path:{type:'string'} }, required:['path'] } },
   { name: 'list_dir', description: 'List files/folders relative to the open project folder.',
     parameters: { type:'object', properties:{ path:{type:'string'} } } },
-  { name: 'write_file', description: 'Create or overwrite a file relative to the project folder. Critical files (.env, package.json, git internals, keys) require user approval.',
+  { name: 'write_file', description: 'Create a NEW file, or fully overwrite an existing one, relative to the project folder. For editing part of an existing file, prefer edit_file — it is safer and less likely to accidentally drop unrelated content. Critical files (.env, package.json, git internals, keys) require user approval.',
     parameters: { type:'object', properties:{ path:{type:'string'}, content:{type:'string'} }, required:['path','content'] } },
+  { name: 'edit_file', description: 'Make a precise, targeted edit to part of an existing file by replacing an exact snippet with a new one — the preferred way to modify existing code (safer than write_file, which replaces the whole file). old_str must match the file content EXACTLY, including whitespace, and must be unique in the file — include enough surrounding context (a few lines before/after) to make it unambiguous. If it is not unique or not found, you will get an error telling you so; re-read the file with read_file and try again with more context.',
+    parameters: { type:'object', properties:{ path:{type:'string'}, old_str:{type:'string'}, new_str:{type:'string'} }, required:['path','old_str','new_str'] } },
   { name: 'delete_file', description: 'Delete a file relative to the project folder. Always requires user approval.',
     parameters: { type:'object', properties:{ path:{type:'string'} }, required:['path'] } },
-  { name: 'run_command', description: 'Run a shell command in the project folder root. Output streams to the Output terminal tab. Destructive commands (rm -rf, force push, sudo, etc.) require user approval.',
+  { name: 'run_command', description: 'Run a shell command as an isolated background process (not visible to the user in real time). Output is captured and returned to you. Use for quick checks, builds, or tests you don\'t need the user to watch live. Destructive commands (rm -rf, force push, sudo, etc.) require user approval. Not suitable for long-running or interactive processes — use run_in_terminal for those.',
+    parameters: { type:'object', properties:{ command:{type:'string'} }, required:['command'] } },
+  { name: 'run_in_terminal', description: 'Run a command in the real, visible integrated terminal the user is looking at — same multi-session PowerShell/CMD/Bash/zsh/WSL terminal the IDE exposes, not a hidden sandbox. Use for: starting dev servers, watch/build loops, REPLs, or anything long-running or interactive, and anything the user should see execute live. Does not return command output synchronously — it streams into the terminal panel in real time. Requires at least one shell terminal to already be open.',
     parameters: { type:'object', properties:{ command:{type:'string'} }, required:['command'] } },
   { name: 'search_codebase', description: 'Keyword/RAG search across the project\'s text files — use this before guessing file contents or locations.',
     parameters: { type:'object', properties:{ query:{type:'string'} }, required:['query'] } },
@@ -2600,8 +2711,22 @@ async function execAgentTool(name, args) {
       if (r.ok && /(^|\/|\\)\.liteide[\/\\]agent-memory\.md$/i.test(args.path)) agentMemoryContent = args.content;
       return r;
     }
+    case 'edit_file': {
+      const r = await api.agent.editFile(args.path, args.old_str, args.new_str);
+      if (r.ok && /(^|\/|\\)\.liteide[\/\\]agent-memory\.md$/i.test(args.path) && agentMemoryContent.includes(args.old_str)) {
+        agentMemoryContent = agentMemoryContent.replace(args.old_str, args.new_str);
+      }
+      return r;
+    }
     case 'delete_file':  return await api.agent.deleteFile(args.path);
     case 'run_command':  return await api.agent.runCommand(args.command);
+    case 'run_in_terminal': {
+      const id = (terminals.get(focusedTermId)?.kind === 'shell') ? focusedTermId : leftTermId;
+      const t = terminals.get(id);
+      if (!t || t.kind !== 'shell') return { ok:false, error:'No open shell terminal to run in — open one with the + button first, or use run_command instead.' };
+      sendToTerminal(id, args.command + '\r');
+      return { ok:true, terminal:t.name, note:`Sent to visible terminal "${t.name}" — output streams live in the terminal panel, not returned here.` };
+    }
     case 'search_codebase': return await api.agent.ragSearch(args.query, 8);
     case 'spawn_subagents': return await runSubagentOrchestration(args.tasks || []);
     default: return { ok:false, error:'Unknown tool: ' + name };
@@ -2649,11 +2774,12 @@ async function runSubagentOrchestration(tasks) {
         if (res.text) finalText = res.text;
         if (!toolCalls || !toolCalls.length) break;
         for (const call of toolCalls) {
-          const result = await execAgentTool(call.name, call.args);
           const stepEl = document.createElement('div');
           stepEl.style.cssText = 'font-size:10.5px;color:var(--t3);margin-top:3px;';
-          stepEl.textContent = `↳ ${call.name}(${JSON.stringify(call.args).slice(0,90)})`;
+          stepEl.textContent = `⏳ ${call.name}(${JSON.stringify(call.args).slice(0,90)}) — waiting for approval…`;
           card.appendChild(stepEl);
+          const result = await execAgentTool(call.name, call.args);
+          stepEl.textContent = `↳ ${call.name}(${JSON.stringify(call.args).slice(0,90)})`;
           history.push({ role:'tool', name: call.name, tool_call_id: call.id, content: JSON.stringify(result) });
         }
       }
@@ -2705,7 +2831,29 @@ function appendChatMsg(role, text) {
   const log = document.getElementById('ai-chat-log');
   const el = document.createElement('div');
   el.className = 'ai-msg ' + role;
-  el.textContent = text;
+  if (role === 'assistant') {
+    const body = document.createElement('div');
+    body.className = 'ai-msg-body';
+    body.textContent = text;
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'ai-msg-copy';
+    copyBtn.title = 'Copy message';
+    copyBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="4" y="4" width="8" height="8" rx="1"/><path d="M2 9V2a1 1 0 0 1 1-1h7"/></svg>';
+    copyBtn.addEventListener('click', () => {
+      navigator.clipboard.writeText(text).then(() => {
+        copyBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2.5 7l3 3 6-6"/></svg>';
+        copyBtn.classList.add('copied');
+        setTimeout(() => {
+          copyBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="4" y="4" width="8" height="8" rx="1"/><path d="M2 9V2a1 1 0 0 1 1-1h7"/></svg>';
+          copyBtn.classList.remove('copied');
+        }, 1400);
+      });
+    });
+    el.appendChild(body);
+    el.appendChild(copyBtn);
+  } else {
+    el.textContent = text;
+  }
   log.appendChild(el);
   log.scrollTop = log.scrollHeight;
   return el;
@@ -2714,12 +2862,24 @@ function appendChatMsg(role, text) {
 function appendToolCard(name, args, result) {
   const log = document.getElementById('ai-chat-log');
   const el = document.createElement('div');
-  const denied = result && result.ok === false && /denied/i.test(result.error || '');
-  el.className = 'ai-tool-card' + (denied ? ' denied' : '');
-  const icon = denied ? '🚫' : { read_file:'📖', list_dir:'📁', write_file:'✏️', delete_file:'🗑️', run_command:'⚡', search_codebase:'🔎' }[name] || '🔧';
+  el.className = 'ai-tool-card';
+  el.innerHTML = `<div class="th"></div><div class="args"></div>`;
+  log.appendChild(el);
+  log.scrollTop = log.scrollHeight;
+  updateToolCard(el, name, args, result);
+  return el;
+}
+
+function updateToolCard(el, name, args, result) {
+  const pending = result === null || result === undefined;
+  const denied = !pending && result.ok === false && /denied/i.test(result.error || '');
+  el.className = 'ai-tool-card' + (denied ? ' denied' : pending ? ' pending' : '');
+  const icon = denied ? '🚫' : pending ? '⏳' : { read_file:'📖', list_dir:'📁', write_file:'✏️', edit_file:'🩹', delete_file:'🗑️', run_command:'⚡', run_in_terminal:'🖥️', search_codebase:'🔎', spawn_subagents:'🧬' }[name] || '🔧';
   const argStr = Object.entries(args || {}).map(([k,v]) => `${k}=${typeof v==='string' && v.length>60 ? v.slice(0,60)+'…' : v}`).join(', ');
-  el.innerHTML = `<div class="th">${icon} ${name}</div><div>${argStr}</div>`;
-  if (result) {
+  el.querySelector('.th').textContent = `${icon} ${name}${pending ? ' — waiting for approval…' : ''}`;
+  el.querySelector('.args').textContent = argStr;
+  const oldPre = el.querySelector('pre'); if (oldPre) oldPre.remove();
+  if (!pending) {
     const pre = document.createElement('pre');
     const summary = result.ok === false ? ('Error: ' + result.error)
       : name === 'read_file' ? (result.content || '').slice(0, 500)
@@ -2729,8 +2889,7 @@ function appendToolCard(name, args, result) {
     pre.textContent = summary || '(done)';
     el.appendChild(pre);
   }
-  log.appendChild(el);
-  log.scrollTop = log.scrollHeight;
+  document.getElementById('ai-chat-log').scrollTop = document.getElementById('ai-chat-log').scrollHeight;
 }
 
 async function sendAgentMessage() {
@@ -2785,8 +2944,9 @@ async function runAgentLoop() {
       if (!res.toolCalls || !res.toolCalls.length) break;
 
       for (const call of res.toolCalls) {
+        const card = appendToolCard(call.name, call.args, null);
         const result = await execAgentTool(call.name, call.args);
-        appendToolCard(call.name, call.args, result);
+        updateToolCard(card, call.name, call.args, result);
         agentHistory.push({ role:'tool', name: call.name, tool_call_id: call.id, content: JSON.stringify(result) });
       }
       if (iterations === 11) { appendChatMsg('system', '⚠️ Stopping after 12 steps — ask a follow-up to continue.'); break; }
@@ -2823,25 +2983,54 @@ function extractToolCallFromText(text) {
   return null;
 }
 
+const UNIVERSAL_SKILL_NAME = 'universal-coding-agent.md';
+let agentSkills = [];
+let universalSkillContent = '';
+async function loadAgentSkills() {
+  agentSkills = await api.agent.listSkills();
+  const universal = agentSkills.find(s => s.name === UNIVERSAL_SKILL_NAME);
+  if (universal) {
+    const r = await api.agent.readFile(universal.path);
+    universalSkillContent = r.ok ? r.content : '';
+    agentSkills = agentSkills.filter(s => s.name !== UNIVERSAL_SKILL_NAME); // don't also list it — it's already fully inlined below
+  } else {
+    universalSkillContent = '';
+  }
+}
 function buildAgentSystemPrompt() {
   const memNote = agentMemoryContent ? `\n\nPersistent project notes (from .liteide/agent-memory.md — update this file with write_file whenever you learn something worth remembering about this project):\n${agentMemoryContent.slice(0, 3000)}` : `\n\nNo persistent notes yet. When you learn something durable about this project (conventions, gotchas, decisions), save it to .liteide/agent-memory.md with write_file so future sessions have it.`;
-  return `You are an autonomous coding agent embedded in LiteIDE, working inside the project folder "${currentFolder || '(none open)'}". Use tools to read files, search the codebase (RAG), edit/create files, and run commands. You can call spawn_subagents to delegate independent sub-tasks that run in parallel. Be concise. Always check real file contents via tools rather than assuming.${memNote}`;
+  const skillsNote = agentSkills.length
+    ? `\n\nOther available skills (read the relevant one via read_file BEFORE starting a matching task):\n${agentSkills.map(s => `- ${s.path}: ${s.description}`).join('\n')}`
+    : '';
+  // The universal skill is foundational, not situational — it's injected in
+  // full, every session, rather than left for the model to decide whether to
+  // go read it. This is also what makes behavior consistent across providers:
+  // it's plain text in the system prompt, nothing provider-specific about it.
+  const universalNote = universalSkillContent
+    ? `\n\n─── CORE OPERATING SKILL (.liteide/skills/${UNIVERSAL_SKILL_NAME} — edit this file to customize your own baseline behavior) ───\n${universalSkillContent}\n─── end core skill ───`
+    : '';
+  return `You are an autonomous coding agent embedded in LiteIDE, working inside the project folder "${currentFolder || '(none open)'}". Use tools to read files, search the codebase (RAG), edit/create files, and run commands. You can call spawn_subagents to delegate independent sub-tasks that run in parallel.${universalNote}${memNote}${skillsNote}`;
 }
 
 // ── Approval modal ──────────────────────────────────────────────────────────
 let pendingApprovalId = null;
 function showApprovalModal(req) {
-  if (document.getElementById('ai-autoapprove').checked && req.action !== 'delete_file') {
-    api.agent.respondApproval(req.id, true);
-    appendToolCard(req.action, req.detail || {}, { ok:true, note:'auto-approved' });
-    return;
+  if (!req || !req.action) {
+    console.error('Malformed approval request received:', req);
+    // Still show something rather than nothing — better to be ugly than silent about a pending decision.
   }
-  pendingApprovalId = req.id;
+  if (document.getElementById('ai-autoapprove').checked && req?.action !== 'delete_file') {
+    api.agent.respondApproval(req.id, true);
+    return; // the pending tool card already visible in chat will update itself with the auto-approved result
+  }
+  pendingApprovalId = req?.id;
   const titles = { write_file:'Write to critical file', delete_file:'Delete file', run_command:'Run risky command' };
-  document.getElementById('ac-title-text').textContent = titles[req.action] || 'Approval needed';
-  const detailText = req.detail?.path ? `Path: ${req.detail.path}` : req.detail?.command ? `Command: ${req.detail.command}` : '';
+  document.getElementById('ac-title-text').textContent = titles[req?.action] || `Approval needed (${req?.action || 'unknown action'})`;
+  let detailText = req?.detail?.path ? `Path: ${req.detail.path}` : req?.detail?.command ? `Command: ${req.detail.command}` : '';
+  if (!detailText && req?.detail) detailText = JSON.stringify(req.detail); // never render truly blank
+  if (!detailText) detailText = '(no detail was provided with this request — this indicates a bug; you can Deny safely)';
   document.getElementById('ac-detail-text').textContent = detailText;
-  const preview = req.detail?.preview || req.detail?.command;
+  const preview = req?.detail?.preview || req?.detail?.command;
   const pre = document.getElementById('ac-preview');
   if (preview) { pre.style.display = 'block'; pre.textContent = preview; } else { pre.style.display = 'none'; }
   document.getElementById('approval-overlay').classList.add('show');

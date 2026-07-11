@@ -50,6 +50,20 @@ describe('Terminal correctness (regression tests for real bugs found in testing)
     assert.equal(extractLaunchFilePath([fakeExe, '.']), null);
   });
 
+  test('resolveShellCmd resolves a bare "cmd.exe" to an absolute COMSPEC path (fixes ConPTY "File not found")', () => {
+    const { resolveShellCmd } = mock.exports;
+    assert.equal(resolveShellCmd('cmd.exe', true, 'C:\\Windows\\System32\\cmd.exe'), 'C:\\Windows\\System32\\cmd.exe');
+    assert.equal(resolveShellCmd('cmd', true, 'C:\\Windows\\System32\\cmd.exe'), 'C:\\Windows\\System32\\cmd.exe');
+    assert.equal(resolveShellCmd('cmd.exe', true, undefined), 'C:\\Windows\\System32\\cmd.exe'); // fallback when COMSPEC missing
+  });
+
+  test('resolveShellCmd leaves already-absolute paths and non-cmd shells untouched', () => {
+    const { resolveShellCmd } = mock.exports;
+    assert.equal(resolveShellCmd('C:\\Windows\\System32\\cmd.exe', true, 'X'), 'C:\\Windows\\System32\\cmd.exe');
+    assert.equal(resolveShellCmd('powershell.exe', true, 'C:\\Windows\\System32\\cmd.exe'), 'powershell.exe');
+    assert.equal(resolveShellCmd('/bin/bash', false, undefined), '/bin/bash');
+  });
+
   test('term:create never throws/rejects even with a stale project root or a bogus shell command (fixes silent "not loading" tabs)', async () => {
     const { handleFns } = mock;
     await handleFns.get('agent:setProjectRoot')({}, '/this/path/does/not/exist/at/all');
