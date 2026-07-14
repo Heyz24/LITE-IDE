@@ -748,6 +748,11 @@ html, body {
 .ai-tool-card.pending { border-color:rgba(255,159,10,.4); background:rgba(255,159,10,.06); }
 .ai-tool-card.pending .th { color:var(--orange); }
 .ai-tool-card .args { margin-top:2px; }
+.tc-diff { margin-top:5px; border-radius:6px; overflow:hidden; max-height:220px; overflow-y:auto; }
+.tc-diff-line { padding:1px 6px; white-space:pre-wrap; word-break:break-word; }
+.tc-diff-line.rem { background:rgba(255,69,58,.12); color:#ff8a80; }
+.tc-diff-line.add { background:rgba(48,209,88,.12); color:#7ee89a; }
+.tc-diff-line.more { color:var(--t3); font-style:italic; padding:2px 6px; }
 
 #ai-input-row {
   display:flex; gap:8px; padding:10px 12px; border-top:1px solid var(--glass-b);
@@ -764,6 +769,10 @@ html, body {
   color:#fff; padding:0 18px; cursor:pointer; font-size:12px; font-weight:500; flex-shrink:0;
 }
 #ai-send-btn:disabled { opacity:.4; cursor:default; }
+#ai-stop-btn {
+  background:#3a1f1f; border:1px solid #8a3a3a; border-radius:var(--r-sm);
+  color:#ff8080; padding:0 18px; cursor:pointer; font-size:12px; font-weight:500; flex-shrink:0;
+}
 #ai-thinking { align-self:flex-start; font-size:11px; color:var(--t3); font-style:italic; padding:2px 4px; }
 
 /* Approval modal */
@@ -1013,6 +1022,13 @@ html, body {
           </label>
           <button class="ai-save-btn ai-close-btn" onclick="closeAgentTab()" title="Close AI Agent tab">✕</button>
         </div>
+        <div class="ai-settings-row" id="ai-budget-row" title="Estimated — token counts are exact (from the provider), dollar figures are a best-effort price-table estimate, not a billing-accurate number">
+          <span id="ai-usage-display">— tokens · ~$0.00 this project</span>
+          <input id="ai-cap-tokens" class="ai-key-input" type="number" min="0" placeholder="max tokens" style="width:110px">
+          <input id="ai-cap-usd" class="ai-key-input" type="number" min="0" step="0.01" placeholder="max $" style="width:80px">
+          <button class="ai-save-btn" onclick="saveBudgetCap()" title="Once either cap is hit, the agent loop stops before its next call">Set Cap</button>
+          <button class="ai-save-btn" onclick="resetAgentUsage()" title="Zero the usage counters for this project (keeps the cap)">Reset Usage</button>
+        </div>
       </div>
       <div id="ai-chat-log">
         <div class="ai-msg system">Ask me to explore, edit, or run something in your project. I can read every file for context, but I'll ask before touching critical files (.env, package.json, git) or running risky commands.</div>
@@ -1020,6 +1036,7 @@ html, body {
       <div id="ai-input-row">
         <textarea id="ai-input" rows="1" placeholder="Ask the agent… (Enter to send, Shift+Enter for new line)"></textarea>
         <button id="ai-send-btn" onclick="sendAgentMessage()">Send</button>
+        <button id="ai-stop-btn" onclick="stopAgentLoop()" style="display:none">Stop</button>
       </div>
     </div>
   </div>
@@ -2589,6 +2606,42 @@ async function initAgentSettings() {
   await loadAgentMemory();
   await loadAgentSkills();
   await loadPersistedHistory();
+  await refreshUsageDisplay();
+}
+
+// ── Cost / token budget caps ────────────────────────────────────────────────
+function formatUsage(u) {
+  const totalTok = (u.totalInputTokens || 0) + (u.totalOutputTokens || 0);
+  const capBits = [];
+  if (u.cap?.maxTokens != null) capBits.push(`cap ${u.cap.maxTokens.toLocaleString()} tok`);
+  if (u.cap?.maxUsd != null) capBits.push(`cap $${u.cap.maxUsd.toFixed(2)}`);
+  return `${totalTok.toLocaleString()} tokens · ~$${(u.totalCostUsd || 0).toFixed(4)} this project` + (capBits.length ? ` (${capBits.join(', ')})` : '');
+}
+async function refreshUsageDisplay() {
+  const el = document.getElementById('ai-usage-display');
+  if (!el) return;
+  try {
+    const u = await api.agent.getUsage();
+    el.textContent = formatUsage(u);
+    document.getElementById('ai-cap-tokens').value = u.cap?.maxTokens ?? '';
+    document.getElementById('ai-cap-usd').value = u.cap?.maxUsd ?? '';
+  } catch { /* no project open yet */ }
+}
+async function saveBudgetCap() {
+  const tokensVal = document.getElementById('ai-cap-tokens').value.trim();
+  const usdVal = document.getElementById('ai-cap-usd').value.trim();
+  await api.agent.setBudgetCap({
+    maxTokens: tokensVal ? Number(tokensVal) : null,
+    maxUsd: usdVal ? Number(usdVal) : null,
+  });
+  await refreshUsageDisplay();
+  toast('💰 Budget cap saved');
+}
+async function resetAgentUsage() {
+  if (!confirm('Reset the token/cost usage counters for this project? The cap itself is kept.')) return;
+  await api.agent.resetUsage();
+  await refreshUsageDisplay();
+  toast('🔄 Usage reset');
 }
 
 // Model field is always free text — suggestions only, never restricted, so
@@ -2692,23 +2745,43 @@ const AGENT_TOOLS = [
     parameters: { type:'object', properties:{ path:{type:'string'}, old_str:{type:'string'}, new_str:{type:'string'} }, required:['path','old_str','new_str'] } },
   { name: 'delete_file', description: 'Delete a file relative to the project folder. Always requires user approval.',
     parameters: { type:'object', properties:{ path:{type:'string'} }, required:['path'] } },
-  { name: 'run_command', description: 'Run a shell command as an isolated background process (not visible to the user in real time). Output is captured and returned to you. Use for quick checks, builds, or tests you don\'t need the user to watch live. Destructive commands (rm -rf, force push, sudo, etc.) require user approval. Not suitable for long-running or interactive processes — use run_in_terminal for those.',
+  { name: 'run_command', description: 'Run a shell command as an isolated background process (not visible to the user in real time). Output is captured and returned to you. Where the OS supports it (Linux with bubblewrap, macOS via Seatbelt) this runs inside a real OS-level sandbox: read access everywhere, write access ONLY inside the project folder, network disabled by default. On Windows it runs hardened but not syscall-sandboxed (jailed to the project folder, minimal environment only) — see README. Use for quick checks, builds, or tests you don\'t need the user to watch live. Destructive commands (rm -rf, force push, sudo, etc.) still require user approval regardless of sandboxing. Not suitable for long-running or interactive processes — use run_in_terminal for those.',
     parameters: { type:'object', properties:{ command:{type:'string'} }, required:['command'] } },
   { name: 'run_in_terminal', description: 'Run a command in the real, visible integrated terminal the user is looking at — same multi-session PowerShell/CMD/Bash/zsh/WSL terminal the IDE exposes, not a hidden sandbox. Use for: starting dev servers, watch/build loops, REPLs, or anything long-running or interactive, and anything the user should see execute live. Does not return command output synchronously — it streams into the terminal panel in real time. Requires at least one shell terminal to already be open.',
     parameters: { type:'object', properties:{ command:{type:'string'} }, required:['command'] } },
   { name: 'search_codebase', description: 'Keyword/RAG search across the project\'s text files — use this before guessing file contents or locations.',
     parameters: { type:'object', properties:{ query:{type:'string'} }, required:['query'] } },
+  { name: 'web_search', description: 'Search the web for current information — documentation, error messages, package/API references, current best practices. Use when the answer depends on something outside this codebase or your training data (e.g. a library\'s current API, a specific error message, current versions).',
+    parameters: { type:'object', properties:{ query:{type:'string'} }, required:['query'] } },
+  { name: 'web_fetch', description: 'Fetch the content of a specific URL (e.g. one found via web_search, or a docs page the user gave you). Returns readable text extracted from the page.',
+    parameters: { type:'object', properties:{ url:{type:'string'} }, required:['url'] } },
   { name: 'spawn_subagents', description: 'Delegate one or more independent sub-tasks to fresh sub-agents that run in parallel, each with their own read/write/run/search tools scoped to this project. Use this to fan out real parallel work (e.g. "write tests for file A" + "update docs for file B" at the same time). Each sub-agent runs to completion (or up to 8 steps) and returns a short result. Do not spawn sub-agents for trivial single steps — do those yourself directly.',
     parameters: { type:'object', properties:{ tasks:{ type:'array', items:{ type:'string' }, description:'One instruction string per sub-agent to spawn in parallel.' } }, required:['tasks'] } },
 ];
 
-async function execAgentTool(name, args) {
+// Fire-and-forget so committing never slows down the agent's tool-call loop.
+// Silent when the project isn't a git repo (common — not every open folder is
+// version controlled) or when git has nothing to commit; only surfaces a
+// subtle toast on an actual successful checkpoint, so it stays out of the way.
+let lastCheckpointToast = 0;
+function checkpointAfterChange(relPath, message) {
+  if (!currentFolder) return;
+  api.agent.checkpoint(relPath, message).then(r => {
+    if (r.ok && Date.now() - lastCheckpointToast > 4000) { // avoid a toast storm during multi-file edits
+      lastCheckpointToast = Date.now();
+      toast('📌 Checkpointed to git — rollback anytime via git log');
+    }
+  }).catch(() => {});
+}
+
+async function execAgentTool(name, args, requestId) {
   switch (name) {
     case 'read_file':   return await api.agent.readFile(args.path);
     case 'list_dir':     return await api.agent.listDir(args.path || '.');
     case 'write_file': {
       const r = await api.agent.writeFile(args.path, args.content ?? '');
       if (r.ok && /(^|\/|\\)\.liteide[\/\\]agent-memory\.md$/i.test(args.path)) agentMemoryContent = args.content;
+      if (r.ok) checkpointAfterChange(args.path, `agent: write ${args.path}`);
       return r;
     }
     case 'edit_file': {
@@ -2716,10 +2789,15 @@ async function execAgentTool(name, args) {
       if (r.ok && /(^|\/|\\)\.liteide[\/\\]agent-memory\.md$/i.test(args.path) && agentMemoryContent.includes(args.old_str)) {
         agentMemoryContent = agentMemoryContent.replace(args.old_str, args.new_str);
       }
+      if (r.ok) checkpointAfterChange(args.path, `agent: edit ${args.path}`);
       return r;
     }
-    case 'delete_file':  return await api.agent.deleteFile(args.path);
-    case 'run_command':  return await api.agent.runCommand(args.command);
+    case 'delete_file': {
+      const r = await api.agent.deleteFile(args.path);
+      if (r.ok) checkpointAfterChange(args.path, `agent: delete ${args.path}`);
+      return r;
+    }
+    case 'run_command':  return await api.agent.runCommand(args.command, { requestId });
     case 'run_in_terminal': {
       const id = (terminals.get(focusedTermId)?.kind === 'shell') ? focusedTermId : leftTermId;
       const t = terminals.get(id);
@@ -2728,6 +2806,8 @@ async function execAgentTool(name, args) {
       return { ok:true, terminal:t.name, note:`Sent to visible terminal "${t.name}" — output streams live in the terminal panel, not returned here.` };
     }
     case 'search_codebase': return await api.agent.ragSearch(args.query, 8);
+    case 'web_search': return await api.agent.webSearch(args.query);
+    case 'web_fetch':  return await api.agent.webFetch(args.url);
     case 'spawn_subagents': return await runSubagentOrchestration(args.tasks || []);
     default: return { ok:false, error:'Unknown tool: ' + name };
   }
@@ -2875,21 +2955,54 @@ function updateToolCard(el, name, args, result) {
   const denied = !pending && result.ok === false && /denied/i.test(result.error || '');
   el.className = 'ai-tool-card' + (denied ? ' denied' : pending ? ' pending' : '');
   const icon = denied ? '🚫' : pending ? '⏳' : { read_file:'📖', list_dir:'📁', write_file:'✏️', edit_file:'🩹', delete_file:'🗑️', run_command:'⚡', run_in_terminal:'🖥️', search_codebase:'🔎', spawn_subagents:'🧬' }[name] || '🔧';
-  const argStr = Object.entries(args || {}).map(([k,v]) => `${k}=${typeof v==='string' && v.length>60 ? v.slice(0,60)+'…' : v}`).join(', ');
-  el.querySelector('.th').textContent = `${icon} ${name}${pending ? ' — waiting for approval…' : ''}`;
-  el.querySelector('.args').textContent = argStr;
+  const filePath = args?.path || '';
+  el.querySelector('.th').textContent = `${icon} ${name}${filePath ? ' — ' + filePath : ''}${pending ? ' (waiting for approval…)' : ''}`;
+  el.querySelector('.args').textContent = (name === 'edit_file' || name === 'write_file') ? '' : Object.entries(args || {}).map(([k,v]) => `${k}=${typeof v==='string' && v.length>60 ? v.slice(0,60)+'…' : v}`).join(', ');
   const oldPre = el.querySelector('pre'); if (oldPre) oldPre.remove();
+  const oldDiff = el.querySelector('.tc-diff'); if (oldDiff) oldDiff.remove();
+
+  if (name === 'edit_file' && args?.old_str !== undefined) {
+    const diff = document.createElement('div');
+    diff.className = 'tc-diff';
+    const oldLines = String(args.old_str).split('\n').map(l => `<div class="tc-diff-line rem">- ${escapeHtml(l)}</div>`).join('');
+    const newLines = String(args.new_str || '').split('\n').map(l => `<div class="tc-diff-line add">+ ${escapeHtml(l)}</div>`).join('');
+    diff.innerHTML = oldLines + newLines;
+    el.appendChild(diff);
+  } else if (name === 'write_file' && args?.content !== undefined) {
+    const diff = document.createElement('div');
+    diff.className = 'tc-diff';
+    const preview = String(args.content).split('\n').slice(0, 12);
+    diff.innerHTML = preview.map(l => `<div class="tc-diff-line add">+ ${escapeHtml(l)}</div>`).join('')
+      + (String(args.content).split('\n').length > 12 ? `<div class="tc-diff-line more">… ${String(args.content).split('\n').length - 12} more lines</div>` : '');
+    el.appendChild(diff);
+  }
+
   if (!pending) {
     const pre = document.createElement('pre');
     const summary = result.ok === false ? ('Error: ' + result.error)
       : name === 'read_file' ? (result.content || '').slice(0, 500)
-      : name === 'run_command' ? ((result.stdout || '') + (result.stderr || '')).slice(-500)
+      : name === 'run_command' ? (`[sandbox: ${result.sandboxType || 'unknown'}] ` + ((result.stdout || '') + (result.stderr || '')).slice(-500))
       : name === 'search_codebase' ? (result.results || []).map(r => `${r.file}:${r.start}`).join('\n')
+      : (name === 'edit_file' || name === 'write_file') ? (result.ok ? '✓ applied' + (result.critical ? ' (approved)' : '') : '')
       : JSON.stringify(result).slice(0, 500);
-    pre.textContent = summary || '(done)';
-    el.appendChild(pre);
+    if (summary) { pre.textContent = summary; el.appendChild(pre); }
   }
   document.getElementById('ai-chat-log').scrollTop = document.getElementById('ai-chat-log').scrollHeight;
+}
+function escapeHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// ── Cancellation ──────────────────────────────────────────────────────────
+// Only one async agent operation (an AI call or a tool call) is ever
+// in-flight at a time — the loop is sequential — so a single "current
+// request id" is enough to know what Stop should cancel. agentStopRequested
+// is checked between steps so the loop itself stops requesting further work
+// even once the in-flight call has been aborted.
+let currentAgentRequestId = null;
+let agentStopRequested = false;
+
+function stopAgentLoop() {
+  agentStopRequested = true;
+  if (currentAgentRequestId) api.agent.cancelRequest(currentAgentRequestId);
 }
 
 async function sendAgentMessage() {
@@ -2905,7 +3018,9 @@ async function sendAgentMessage() {
 
 async function runAgentLoop() {
   agentBusy = true;
-  document.getElementById('ai-send-btn').disabled = true;
+  agentStopRequested = false;
+  document.getElementById('ai-send-btn').style.display = 'none';
+  document.getElementById('ai-stop-btn').style.display = '';
   const log = document.getElementById('ai-chat-log');
   function showThinking() {
     const el = document.createElement('div');
@@ -2918,15 +3033,21 @@ async function runAgentLoop() {
 
   const provider = document.getElementById('ai-provider-sel').value;
   const model = document.getElementById('ai-model-input').value.trim();
-  if (!model) { thinkingEl.remove(); appendChatMsg('system', '⚠️ Type a model name in the settings bar first.'); agentBusy = false; document.getElementById('ai-send-btn').disabled = false; return; }
+  if (!model) { thinkingEl.remove(); appendChatMsg('system', '⚠️ Type a model name in the settings bar first.'); agentBusy = false; document.getElementById('ai-send-btn').style.display = ''; document.getElementById('ai-stop-btn').style.display = 'none'; return; }
   const systemPrompt = buildAgentSystemPrompt();
 
   let iterations = 0;
   try {
     while (iterations++ < 12) {
-      const res = await api.ai.chatOnce({ provider, model, messages: agentHistory, tools: AGENT_TOOLS, systemPrompt });
+      if (agentStopRequested) { thinkingEl.remove(); appendChatMsg('system', '⏹ Stopped by user.'); break; }
+      currentAgentRequestId = crypto.randomUUID();
+      const res = await api.ai.chatOnce({ provider, model, messages: agentHistory, tools: AGENT_TOOLS, systemPrompt, requestId: currentAgentRequestId });
+      currentAgentRequestId = null;
       thinkingEl.remove();
+      if (res.aborted) { appendChatMsg('system', '⏹ Stopped by user.'); break; }
+      if (res.budgetExceeded) { appendChatMsg('system', '💰 ' + res.reason + ' Raise the cap in Agent Settings to continue, or use agent:resetUsage.'); break; }
       if (res.error) { appendChatMsg('system', '⚠️ ' + res.error); break; }
+      if (res.cumulativeUsage) refreshUsageDisplay();
 
       // Some local/older models (e.g. many Ollama models) don't reliably use
       // structured function-calling — they print the call as JSON text instead.
@@ -2944,11 +3065,16 @@ async function runAgentLoop() {
       if (!res.toolCalls || !res.toolCalls.length) break;
 
       for (const call of res.toolCalls) {
+        if (agentStopRequested) { appendChatMsg('system', '⏹ Stopped before running remaining tool calls.'); break; }
         const card = appendToolCard(call.name, call.args, null);
-        const result = await execAgentTool(call.name, call.args);
+        currentAgentRequestId = crypto.randomUUID();
+        const result = await execAgentTool(call.name, call.args, currentAgentRequestId);
+        currentAgentRequestId = null;
         updateToolCard(card, call.name, call.args, result);
         agentHistory.push({ role:'tool', name: call.name, tool_call_id: call.id, content: JSON.stringify(result) });
+        if (result.cancelled) { appendChatMsg('system', '⏹ Stopped by user.'); agentStopRequested = true; }
       }
+      if (agentStopRequested) break;
       if (iterations === 11) { appendChatMsg('system', '⚠️ Stopping after 12 steps — ask a follow-up to continue.'); break; }
       thinkingEl = showThinking(); // model will react to the tool results next loop
     }
@@ -2956,8 +3082,10 @@ async function runAgentLoop() {
     thinkingEl?.remove();
     appendChatMsg('system', '⚠️ ' + (e.message || e));
   }
+  currentAgentRequestId = null;
   agentBusy = false;
-  document.getElementById('ai-send-btn').disabled = false;
+  document.getElementById('ai-send-btn').style.display = '';
+  document.getElementById('ai-stop-btn').style.display = 'none';
   saveHistoryToDisk();
 }
 

@@ -131,7 +131,7 @@ describe('Renderer HTML static integrity (src/index.html)', () => {
     const declared = [...toolsMatch[1].matchAll(/name:\s*'([a-z_]+)'/g)].map(m => m[1]);
     assert.ok(declared.length >= 8, 'expected at least 8 agent tools declared');
 
-    const execMatch = inlineScript.match(/async function execAgentTool\(name, args\) \{([\s\S]*?)\n\}/);
+    const execMatch = inlineScript.match(/async function execAgentTool\(name, args(?:, requestId)?\) \{([\s\S]*?)\n\}/);
     assert.ok(execMatch, 'execAgentTool not found');
     const implemented = [...execMatch[1].matchAll(/case\s+'([a-z_]+)'/g)].map(m => m[1]);
 

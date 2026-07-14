@@ -4,6 +4,7 @@ const fs = require('fs');
 const { spawn, exec } = require('child_process');
 const os = require('os');
 const crypto = require('crypto');
+const sandbox = require('./agent-sandbox.js');
 
 const IS_WIN = process.platform === 'win32';
 const IS_MAC = process.platform === 'darwin';
@@ -335,22 +336,22 @@ const termSessions = new Map(); // id -> { proc, isPty, shellCmd }
 async function listAvailableShells() {
   const shells = [];
   if (IS_WIN) {
+    const sysRoot = process.env.SystemRoot || process.env.windir || 'C:\\Windows';
     const candidates = [
-      { name: 'PowerShell 7',   cmd: 'pwsh.exe' },
-      { name: 'PowerShell',     cmd: 'powershell.exe' },
-      { name: 'Command Prompt', cmd: 'cmd.exe' },
+      { name: 'PowerShell 7',   cmd: 'pwsh.exe' }, // no fixed location — install path varies, keep 'where' lookup
+      { name: 'PowerShell',     cmd: path.join(sysRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe') },
+      { name: 'Command Prompt', cmd: path.join(sysRoot, 'System32', 'cmd.exe') },
       { name: 'Git Bash',       cmd: path.join('C:','Program Files','Git','bin','bash.exe') },
       { name: 'Git Bash (x86)', cmd: path.join('C:','Program Files (x86)','Git','bin','bash.exe') },
-      { name: 'WSL',            cmd: 'wsl.exe' },
+      { name: 'WSL',            cmd: path.join(sysRoot, 'System32', 'wsl.exe') },
     ];
     for (const s of candidates) {
       if (s.cmd.includes(path.sep)) {
         if (fs.existsSync(s.cmd)) shells.push(s);
         continue;
       }
-      // ConPTY needs an absolute path — a bare command name like "cmd.exe"
-      // can fail to launch even though `where` finds it, because pty.spawn's
-      // process creation doesn't always search PATH the way a shell would.
+      // Only pwsh.exe reaches here now — genuinely needs a PATH search since
+      // its install location varies (winget/MSI/scoop/choco all differ).
       const resolved = await new Promise(r => exec(`where ${s.cmd}`, (err, stdout) => {
         r(err ? null : (stdout || '').split(/\r?\n/)[0].trim());
       }));
@@ -557,7 +558,7 @@ ipcMain.handle('ai:listOllamaModels', async () => {
 //   {role:'tool', tool_call_id, name, content:string}   (a tool's result)
 // Each adapter converts that into whatever wire format its API actually wants.
 
-async function callOpenAI(apiKey, model, messages, tools, systemPrompt) {
+async function callOpenAI(apiKey, model, messages, tools, systemPrompt, signal) {
   const wire = messages.map(m => {
     if (m.role === 'assistant') {
       const out = { role:'assistant', content: m.content || null };
@@ -576,15 +577,17 @@ async function callOpenAI(apiKey, model, messages, tools, systemPrompt) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
     body: JSON.stringify(body),
+    signal,
   });
   const data = await res.json();
   if (data.error) throw new Error(data.error.message || 'OpenAI error');
   const msg = data.choices[0].message;
   const toolCalls = (msg.tool_calls || []).map(tc => ({ id: tc.id, name: tc.function.name, args: JSON.parse(tc.function.arguments || '{}') }));
-  return { text: msg.content || '', toolCalls };
+  const usage = { inputTokens: data.usage?.prompt_tokens || 0, outputTokens: data.usage?.completion_tokens || 0 };
+  return { text: msg.content || '', toolCalls, usage };
 }
 
-async function callAnthropic(apiKey, model, messages, tools, systemPrompt) {
+async function callAnthropic(apiKey, model, messages, tools, systemPrompt, signal) {
   const wire = messages.map(m => {
     if (m.role === 'assistant') {
       const blocks = [];
@@ -604,6 +607,7 @@ async function callAnthropic(apiKey, model, messages, tools, systemPrompt) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
     body: JSON.stringify(body),
+    signal,
   });
   const data = await res.json();
   if (data.error) throw new Error(data.error.message || 'Anthropic error');
@@ -613,10 +617,11 @@ async function callAnthropic(apiKey, model, messages, tools, systemPrompt) {
     if (block.type === 'text') text += block.text;
     if (block.type === 'tool_use') toolCalls.push({ id: block.id, name: block.name, args: block.input });
   }
-  return { text, toolCalls };
+  const usage = { inputTokens: data.usage?.input_tokens || 0, outputTokens: data.usage?.output_tokens || 0 };
+  return { text, toolCalls, usage };
 }
 
-async function callGemini(apiKey, model, messages, tools, systemPrompt) {
+async function callGemini(apiKey, model, messages, tools, systemPrompt, signal) {
   // Best-effort mapping — Google has churned this format across API versions,
   // so double-check against current docs if function calling misbehaves.
   const contents = messages.map(m => {
@@ -641,7 +646,7 @@ async function callGemini(apiKey, model, messages, tools, systemPrompt) {
     ...(tools?.length ? { tools: [{ functionDeclarations: tools.map(t => ({ name: t.name, description: t.description, parameters: t.parameters })) }] } : {}),
   };
   const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal,
   });
   const data = await res.json();
   if (data.error) throw new Error(data.error.message || 'Gemini error');
@@ -657,10 +662,11 @@ async function callGemini(apiKey, model, messages, tools, systemPrompt) {
       });
     }
   }
-  return { text, toolCalls };
+  const usage = { inputTokens: data.usageMetadata?.promptTokenCount || 0, outputTokens: data.usageMetadata?.candidatesTokenCount || 0 };
+  return { text, toolCalls, usage };
 }
 
-async function callOllama(baseUrl, model, messages, tools, systemPrompt) {
+async function callOllama(baseUrl, model, messages, tools, systemPrompt, signal) {
   const wire = messages.map(m => {
     if (m.role === 'assistant') {
       const out = { role:'assistant', content: m.content || '' };
@@ -676,27 +682,78 @@ async function callOllama(baseUrl, model, messages, tools, systemPrompt) {
     ...(tools?.length ? { tools: tools.map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters } })) } : {}),
   };
   const res = await fetch(`${baseUrl}/api/chat`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal,
   });
   const data = await res.json();
   if (data.error) throw new Error(data.error);
   const msg = data.message || {};
   const toolCalls = (msg.tool_calls || []).map(tc => ({ id: crypto.randomUUID(), name: tc.function.name, args: tc.function.arguments || {} }));
-  return { text: msg.content || '', toolCalls };
+  const usage = { inputTokens: data.prompt_eval_count || 0, outputTokens: data.eval_count || 0 };
+  return { text: msg.content || '', toolCalls, usage };
 }
+
+// requestId -> AbortController, for in-flight ai:chatOnce calls the renderer
+// may cancel. requestId -> child process, for in-flight agent:runCommand
+// calls. Both cleared as soon as the call settles (success, error, or abort)
+// so cancelling a stale/already-finished requestId is just a harmless no-op.
+const activeAiControllers = new Map();
+const activeCommandProcesses = new Map();
+
+function killCommandProcess(proc) {
+  if (!proc || proc.killed) return;
+  proc.__liteideCancelled = true; // read by the close handler — exit-code heuristics for "was this killed?" aren't reliable across platforms (Windows taskkill and POSIX SIGTERM don't map to one consistent code), so the kill site marks it explicitly instead.
+  try {
+    if (IS_WIN) spawn('taskkill', ['/pid', String(proc.pid), '/t', '/f']);
+    // Spawned detached (own process group) on POSIX specifically so a shell
+    // command that forks children (e.g. `npm run build` -> node -> ...) is
+    // killed as a whole tree, not just the immediate shell.
+    else { try { process.kill(-proc.pid, 'SIGTERM'); } catch { proc.kill('SIGTERM'); } }
+  } catch { /* best-effort — process may have already exited */ }
+}
+
+ipcMain.on('agent:cancelRequest', (_, requestId) => {
+  const ctrl = activeAiControllers.get(requestId);
+  if (ctrl) ctrl.abort();
+  const proc = activeCommandProcesses.get(requestId);
+  if (proc) killCommandProcess(proc);
+});
 
 // Single normalized entry point used by the renderer's agent loop.
 // `messages`: [{role:'user'|'assistant'|'tool', content, tool_call_id?, name?}]
-ipcMain.handle('ai:chatOnce', async (_, { provider, model, messages, tools, systemPrompt }) => {
+// `requestId` (optional): lets the renderer cancel this specific in-flight
+// call later via agent:cancelRequest, without affecting any other call.
+ipcMain.handle('ai:chatOnce', async (_, { provider, model, messages, tools, systemPrompt, requestId }) => {
   const cfg = loadAiConfig();
+  // Budget check happens BEFORE the network call — once a project's cap is
+  // hit, the agent loop must not place even one more paid call. Silently
+  // skipping this until after the call would mean the cap always gets
+  // overshot by whatever the very next request costs.
+  if (projectRoot) {
+    const u = loadUsage();
+    const reason = budgetExceededReason(u);
+    if (reason) return { budgetExceeded: true, reason, usage: u };
+  }
+  const controller = new AbortController();
+  if (requestId) activeAiControllers.set(requestId, controller);
   try {
-    if (provider === 'openai')     return await callOpenAI(cfg.keys.openai, model, messages, tools, systemPrompt);
-    if (provider === 'anthropic')  return await callAnthropic(cfg.keys.anthropic, model, messages, tools, systemPrompt);
-    if (provider === 'gemini')     return await callGemini(cfg.keys.gemini, model, messages, tools, systemPrompt);
-    if (provider === 'ollama')     return await callOllama(cfg.ollamaUrl, model, messages, tools, systemPrompt);
-    throw new Error('Unknown provider: ' + provider);
+    let result;
+    if (provider === 'openai')     result = await callOpenAI(cfg.keys.openai, model, messages, tools, systemPrompt, controller.signal);
+    else if (provider === 'anthropic')  result = await callAnthropic(cfg.keys.anthropic, model, messages, tools, systemPrompt, controller.signal);
+    else if (provider === 'gemini')     result = await callGemini(cfg.keys.gemini, model, messages, tools, systemPrompt, controller.signal);
+    else if (provider === 'ollama')     result = await callOllama(cfg.ollamaUrl, model, messages, tools, systemPrompt, controller.signal);
+    else throw new Error('Unknown provider: ' + provider);
+
+    if (projectRoot && result.usage) {
+      const { usage, callCostUsd } = recordUsage(provider, model, result.usage.inputTokens, result.usage.outputTokens);
+      result.usage.costUsd = callCostUsd;
+      result.cumulativeUsage = usage;
+    }
+    return result;
   } catch (e) {
+    if (e.name === 'AbortError') return { aborted: true };
     return { error: e.message || String(e) };
+  } finally {
+    if (requestId) activeAiControllers.delete(requestId);
   }
 });
 
@@ -727,6 +784,91 @@ function resolveInProject(relPath) {
   return abs;
 }
 
+// ── Cost / token budget caps ────────────────────────────────────────────────
+// Per-project (not per-app) — a hobby project and a client project reasonably
+// want different limits, and usage naturally belongs alongside the other
+// per-project agent state in .liteide/.
+//
+// Pricing is a best-effort $/million-token table, NOT a live lookup — it will
+// drift as providers change prices. It exists to give a meaningful running
+// estimate and a real enforcement point, not to be a billing-accurate figure.
+// Users should treat the dollar figure as directional and check their
+// provider's actual invoice for ground truth; the token counts themselves
+// (used for the token-cap enforcement path) come directly from each
+// provider's own response and ARE exact.
+const PRICING_USD_PER_MTOK = {
+  anthropic: [
+    { match: /opus/i, in: 15, out: 75 },
+    { match: /sonnet/i, in: 3, out: 15 },
+    { match: /haiku/i, in: 0.8, out: 4 },
+  ],
+  openai: [
+    { match: /mini|nano/i, in: 0.15, out: 0.6 },
+    { match: /gpt-5|gpt-4\.1|gpt-4o|^o[0-9]/i, in: 2.5, out: 10 },
+  ],
+  gemini: [
+    { match: /flash/i, in: 0.075, out: 0.3 },
+    { match: /pro/i, in: 1.25, out: 5 },
+  ],
+  ollama: [{ match: /.*/, in: 0, out: 0 }], // local inference — no per-token cost
+};
+function estimateCostUsd(provider, model, inputTokens, outputTokens) {
+  const rules = PRICING_USD_PER_MTOK[provider] || [];
+  const rule = rules.find(r => r.match.test(model || '')) || { in: 3, out: 15 }; // unknown model — mid-range generic fallback
+  return (inputTokens / 1e6) * rule.in + (outputTokens / 1e6) * rule.out;
+}
+
+function usagePath() { return path.join(projectRoot, '.liteide', 'agent-usage.json'); }
+function loadUsage() {
+  try { return JSON.parse(fs.readFileSync(usagePath(), 'utf8')); }
+  catch { return { totalInputTokens: 0, totalOutputTokens: 0, totalCostUsd: 0, callCount: 0, cap: { maxTokens: null, maxUsd: null }, log: [] }; }
+}
+function saveUsage(u) {
+  fs.mkdirSync(path.dirname(usagePath()), { recursive: true });
+  // Cap the log so this file doesn't grow forever across a long project life.
+  u.log = (u.log || []).slice(-200);
+  fs.writeFileSync(usagePath(), JSON.stringify(u, null, 2), 'utf8');
+}
+function recordUsage(provider, model, inputTokens, outputTokens) {
+  const u = loadUsage();
+  const costUsd = estimateCostUsd(provider, model, inputTokens, outputTokens);
+  u.totalInputTokens += inputTokens;
+  u.totalOutputTokens += outputTokens;
+  u.totalCostUsd += costUsd;
+  u.callCount += 1;
+  u.log.push({ ts: Date.now(), provider, model, inputTokens, outputTokens, costUsd });
+  saveUsage(u);
+  return { usage: u, callCostUsd: costUsd };
+}
+function budgetExceededReason(u) {
+  if (u.cap.maxTokens != null && (u.totalInputTokens + u.totalOutputTokens) >= u.cap.maxTokens) {
+    return `Token cap reached (${(u.totalInputTokens + u.totalOutputTokens).toLocaleString()} / ${u.cap.maxTokens.toLocaleString()} tokens for this project).`;
+  }
+  if (u.cap.maxUsd != null && u.totalCostUsd >= u.cap.maxUsd) {
+    return `Cost cap reached (~$${u.totalCostUsd.toFixed(4)} / $${u.cap.maxUsd.toFixed(2)} estimated for this project).`;
+  }
+  return null;
+}
+
+ipcMain.handle('agent:getUsage', async () => {
+  if (!projectRoot) return { totalInputTokens: 0, totalOutputTokens: 0, totalCostUsd: 0, callCount: 0, cap: { maxTokens: null, maxUsd: null }, log: [] };
+  return loadUsage();
+});
+ipcMain.handle('agent:setBudgetCap', async (_, { maxTokens, maxUsd }) => {
+  if (!projectRoot) throw new Error('No project folder open');
+  const u = loadUsage();
+  u.cap = { maxTokens: maxTokens ?? null, maxUsd: maxUsd ?? null };
+  saveUsage(u);
+  return u;
+});
+ipcMain.handle('agent:resetUsage', async () => {
+  if (!projectRoot) throw new Error('No project folder open');
+  const u = loadUsage();
+  const reset = { totalInputTokens: 0, totalOutputTokens: 0, totalCostUsd: 0, callCount: 0, cap: u.cap, log: [] };
+  saveUsage(reset);
+  return reset;
+});
+
 // Approval round-trip: main asks renderer to show a glass popup, waits for the click.
 const pendingApprovals = new Map();
 ipcMain.on('agent:approvalResponse', (_, { id, approved }) => {
@@ -744,9 +886,9 @@ function requestApproval(action, detail) {
 
 // ── Universal Coding Agent skill — seeded into every project, provider-agnostic ──
 const UNIVERSAL_SKILL_NAME = 'universal-coding-agent.md';
-const UNIVERSAL_SKILL_VERSION = '1.1.0';
-const UNIVERSAL_SKILL_CONTENT = `<!-- LiteIDE Universal Coding Agent Skill — v1.1.0 -->
-# Universal Coding Agent Skill — v1.1.0
+const UNIVERSAL_SKILL_VERSION = '1.2.0';
+const UNIVERSAL_SKILL_CONTENT = `<!-- LiteIDE Universal Coding Agent Skill — v1.2.0 -->
+# Universal Coding Agent Skill — v1.2.0
 
 Provider-agnostic core discipline. Applies identically whether you are Claude, GPT, Gemini, or a local Ollama model — this is plain instruction text, not a provider-specific feature. Every directive below is a hard rule, not a suggestion, unless marked "prefer."
 
@@ -825,7 +967,7 @@ Provider-agnostic core discipline. Applies identically whether you are Claude, G
 ## 11. Failure honesty
 - A tool/compiler/interpreter not installed → say exactly that, name the missing tool, don't silently skip the step.
 - A test that fails → show the real failure output, don't paraphrase it away.
-- A task partially done → say precisely how far you got and what remains, never imply full completion.
+- A task partially done → say precisely how far you got and what remains, never imply full completion.\n\n## 12. Auto-checkpointing (v1.2.0)\n- Every successful write_file/edit_file/delete_file is committed to git automatically, one commit per change, if the project is a git repo. You do not need to run git commit yourself for routine changes \u2014 doing so is redundant and can create duplicate/conflicting commits.\n- This means every change you make already has a clean rollback point via git log / git revert \u2014 act with that safety net in mind, but it does not lower the bar for the approval-gated actions in section 7; those rules are unchanged.\n- If the project is not a git repo, checkpointing is silently skipped \u2014 this is expected, not an error, and needs no special handling from you.
 `;
 
 // Seeds the skill on first project open. On later opens, if the on-disk file
@@ -925,8 +1067,15 @@ ipcMain.handle('agent:deleteFile', async (_, relPath) => {
   } catch (e) { return { ok: false, error: e.message }; }
 });
 
-// Tool: run shell command — gated only if it matches a destructive pattern
-ipcMain.handle('agent:runCommand', async (_, cmd) => {
+// Tool: run shell command — regex-gated for destructive patterns (as before)
+// AND, underneath that, run inside a real OS-level sandbox where the
+// platform supports one (bubblewrap on Linux, Seatbelt on macOS): read
+// access everywhere (dev tools/system libs need it), write access ONLY to
+// the project folder + its own scratch tmp dir, network unshared unless
+// explicitly requested. See agent-sandbox.js for the platform matrix and
+// the honest limitation on Windows (no dependency-free OS primitive there
+// yet — interim hardening: jailed cwd + minimal env only).
+ipcMain.handle('agent:runCommand', async (_, cmd, opts = {}) => {
   try {
     const critical = isCriticalCommand(cmd);
     if (critical) {
@@ -934,18 +1083,40 @@ ipcMain.handle('agent:runCommand', async (_, cmd) => {
       if (!approved) return { ok: false, error: 'Denied by user' };
     }
     if (!projectRoot) return { ok: false, error: 'No project folder open' };
+    const sh = IS_WIN ? 'cmd' : 'bash';
+    const flag = IS_WIN ? '/c' : '-c';
+    const built = sandbox.buildSandboxedCommand(cmd, {
+      projectRoot, env: process.env, shell: sh, shellFlag: flag,
+      allowNetwork: !!opts.allowNetwork,
+    });
     return await new Promise(resolve => {
-      const sh = IS_WIN ? 'cmd' : 'bash';
-      const flag = IS_WIN ? '/c' : '-c';
-      const child = spawn(sh, [flag, cmd], { cwd: projectRoot, env: process.env });
+      const child = spawn(built.command, built.args, { cwd: projectRoot, env: built.env, detached: !IS_WIN });
+      if (opts.requestId) activeCommandProcesses.set(opts.requestId, child);
       let out = '', err = '';
       child.stdout.on('data', d => { out += d.toString(); safeSend('agent:commandOutput', { stream: 'stdout', data: d.toString() }); });
       child.stderr.on('data', d => { err += d.toString(); safeSend('agent:commandOutput', { stream: 'stderr', data: d.toString() }); });
-      child.on('close', code => resolve({ ok: true, code, stdout: out.slice(-8000), stderr: err.slice(-8000), critical }));
-      child.on('error', e => resolve({ ok: false, error: e.message }));
+      child.on('close', code => {
+        if (built.cleanup) built.cleanup();
+        if (opts.requestId) activeCommandProcesses.delete(opts.requestId);
+        resolve({
+          ok: true, code, stdout: out.slice(-8000), stderr: err.slice(-8000), critical,
+          sandboxType: built.sandboxType, sandboxed: built.sandboxed,
+          cancelled: !!child.__liteideCancelled,
+        });
+      });
+      child.on('error', e => {
+        if (built.cleanup) built.cleanup();
+        if (opts.requestId) activeCommandProcesses.delete(opts.requestId);
+        resolve({ ok: false, error: e.message, sandboxType: built.sandboxType, sandboxed: built.sandboxed });
+      });
     });
   } catch (e) { return { ok: false, error: e.message }; }
 });
+
+// Lets the renderer show real sandbox status (e.g. a one-time notice if this
+// machine is running commands unsandboxed) without guessing at platform
+// capability itself.
+ipcMain.handle('agent:getSandboxStatus', async () => sandbox.detectSandboxCapability());
 
 // ─── Project-wide Search & Replace ──────────────────────────────────────────
 const SEARCH_IGNORE_DIRS = new Set(['.git','node_modules','__pycache__','dist','build','.cache','.liteide','target']);
@@ -1064,6 +1235,22 @@ ipcMain.handle('git:diff', async (_, relPath) => {
   return { ok: true, original: head.ok ? head.stdout : '', modified: current, untracked: false };
 });
 
+// Auto-checkpoint: commit each successful agent file change immediately, so
+// every edit has a clean rollback point (git log / git revert) with zero
+// effort from the user — the safety net every production coding agent
+// (Aider, Claude Code) relies on instead of a bespoke undo system.
+ipcMain.handle('agent:checkpoint', async (_, relPath, message) => {
+  if (!projectRoot) return { ok: false, skipped: 'no project open' };
+  const repoCheck = await runGit('rev-parse --is-inside-work-tree', projectRoot);
+  if (!repoCheck.ok || repoCheck.stdout.trim() !== 'true') return { ok: false, skipped: 'not a git repo' };
+  await runGit(`add -- "${relPath}"`, projectRoot);
+  const safeMsg = String(message).replace(/"/g, '\\"').slice(0, 200);
+  const commit = await runGit(`commit -m "${safeMsg}" -- "${relPath}"`, projectRoot);
+  // Fails harmlessly (not an error) if there's nothing to commit, or no git
+  // identity configured yet — either way the file write itself already succeeded.
+  return { ok: commit.ok, skipped: commit.ok ? undefined : (commit.stderr || commit.stdout || 'nothing to commit').trim() };
+});
+
 // ── Lightweight local RAG (no vector DB / no embedding API required) ───────
 // Chunks text files under the project and scores chunks against the query
 // with a simple TF-IDF-ish keyword overlap — fast, offline, zero dependency,
@@ -1162,3 +1349,4 @@ ipcMain.handle('app:platform', ()       => process.platform);
 ipcMain.handle('app:homedir',  ()       => os.homedir());
 
 module.exports = { buildCdCommand, extractLaunchFilePath, isCriticalFile, isCriticalCommand, winPathToWslPath, resolveShellCmd };
+module.exports.sandbox = sandbox;

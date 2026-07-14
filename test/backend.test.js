@@ -260,7 +260,28 @@ describe('Backend IPC handlers (real main.js code, mocked Electron only)', () =>
     }
     assert.ok(universal, 'universal-coding-agent.md should be auto-seeded (waited up to 1s for filesystem visibility)');
     const r = await mock.handleFns.get('agent:readFile')(EVT, universal.path);
-    assert.match(r.content, /v1\.1\.0/);
+    assert.match(r.content, /v1\.2\.0/);
+  });
+
+  test('agent:checkpoint skips gracefully (not an error) when the project is not a git repo', async () => {
+    const result = await mock.handleFns.get('agent:checkpoint')(EVT, 'somefile.txt', 'test commit');
+    assert.equal(result.ok, false);
+    assert.match(result.skipped, /not a git repo/);
+  });
+
+  test('agent:checkpoint creates a real commit when the project IS a git repo', async () => {
+    const { execSync } = require('node:child_process');
+    try {
+      execSync('git init -q', { cwd: projectDir });
+      execSync('git config user.email "test@example.com"', { cwd: projectDir });
+      execSync('git config user.name "Test"', { cwd: projectDir });
+    } catch (e) { return; } // git not available in this environment — skip rather than fail
+
+    fs.writeFileSync(path.join(projectDir, 'checkpoint-me.txt'), 'hello');
+    const result = await mock.handleFns.get('agent:checkpoint')(EVT, 'checkpoint-me.txt', 'agent: write checkpoint-me.txt');
+    assert.equal(result.ok, true);
+    const log = execSync('git log --oneline', { cwd: projectDir }).toString();
+    assert.match(log, /agent: write checkpoint-me\.txt/);
   });
 
   test('shell:getAvailable returns an array (system shell auto-detection runs without throwing)', async () => {
