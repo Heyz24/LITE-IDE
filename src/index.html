@@ -1028,6 +1028,24 @@ html, body {
           <input id="ai-cap-usd" class="ai-key-input" type="number" min="0" step="0.01" placeholder="max $" style="width:80px">
           <button class="ai-save-btn" onclick="saveBudgetCap()" title="Once either cap is hit, the agent loop stops before its next call">Set Cap</button>
           <button class="ai-save-btn" onclick="resetAgentUsage()" title="Zero the usage counters for this project (keeps the cap)">Reset Usage</button>
+          <input id="ai-compact-threshold" class="ai-key-input" type="number" min="1000" step="1000" placeholder="compact @ tokens" style="width:130px" title="Once a single call's real input-token count crosses this, older turns are auto-summarized to shrink future requests">
+          <button class="ai-save-btn" onclick="saveCompactionThreshold()">Set</button>
+        </div>
+        <div class="ai-settings-row" id="ai-verify-row" title="When enabled, a successful write_file/edit_file on a code file automatically runs this command (sandboxed, with a timeout) and reports pass/fail back to the agent in the same tool result">
+          <label class="ai-autoapprove-label">
+            <input type="checkbox" id="ai-verify-enabled" onchange="saveVerifyConfigFromUI()" style="accent-color:var(--purple)"> Auto-verify edits
+          </label>
+          <input id="ai-verify-command" class="ai-key-input" type="text" placeholder="test command (auto-detected)" style="width:220px">
+          <button class="ai-save-btn" onclick="saveVerifyConfigFromUI()">Save</button>
+        </div>
+        <div class="ai-settings-row" id="ai-perm-row" title="Per-category permissions: allow = silent, ask = always confirm, deny = blocked outright. Sits underneath the existing critical-file/critical-command confirmations, which still apply independently.">
+          <span style="font-size:11px;color:var(--t3)">Permissions:</span>
+          <select id="perm-read" class="ai-key-input" style="width:90px" onchange="savePermissionsFromUI()" title="read_file, list_dir, search_codebase"><option value="allow">read: allow</option><option value="ask">read: ask</option><option value="deny">read: deny</option></select>
+          <select id="perm-write" class="ai-key-input" style="width:95px" onchange="savePermissionsFromUI()" title="write_file, edit_file"><option value="allow">write: allow</option><option value="ask">write: ask</option><option value="deny">write: deny</option></select>
+          <select id="perm-delete" class="ai-key-input" style="width:100px" onchange="savePermissionsFromUI()" title="delete_file — allow still confirms, only deny is silent-free"><option value="allow">delete: allow</option><option value="ask">delete: ask</option><option value="deny">delete: deny</option></select>
+          <select id="perm-execute" class="ai-key-input" style="width:105px" onchange="savePermissionsFromUI()" title="run_command"><option value="allow">execute: allow</option><option value="ask">execute: ask</option><option value="deny">execute: deny</option></select>
+          <select id="perm-network" class="ai-key-input" style="width:105px" onchange="savePermissionsFromUI()" title="web_search, web_fetch"><option value="allow">network: allow</option><option value="ask">network: ask</option><option value="deny">network: deny</option></select>
+          <select id="perm-subagents" class="ai-key-input" style="width:115px" onchange="savePermissionsFromUI()" title="spawn_subagents"><option value="allow">subagents: allow</option><option value="ask">subagents: ask</option><option value="deny">subagents: deny</option></select>
         </div>
       </div>
       <div id="ai-chat-log">
@@ -2592,6 +2610,9 @@ async function initAgentSettings() {
   onProviderChange(cfg.model);
   document.getElementById('ai-status-dot').classList.toggle('on', !!(cfg.hasKey && cfg.hasKey[cfg.provider]) || cfg.provider === 'ollama');
   document.getElementById('ai-key-input').placeholder = (cfg.hasKey && cfg.hasKey[cfg.provider]) ? 'Key saved (hidden)' : 'API key';
+  compactAfterTokens = cfg.compactAfterTokens || 50000;
+  const compactInput = document.getElementById('ai-compact-threshold');
+  if (compactInput) compactInput.value = compactAfterTokens;
 
   document.getElementById('ai-input').addEventListener('keydown', e => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendAgentMessage(); }
@@ -2607,6 +2628,46 @@ async function initAgentSettings() {
   await loadAgentSkills();
   await loadPersistedHistory();
   await refreshUsageDisplay();
+  await refreshVerifyConfigDisplay();
+  await refreshPermissionsDisplay();
+}
+
+async function refreshPermissionsDisplay() {
+  const el = document.getElementById('perm-read');
+  if (!el) return;
+  try {
+    const p = await api.agent.getPermissions();
+    for (const cat of ['read', 'write', 'delete', 'execute', 'network', 'subagents']) {
+      const sel = document.getElementById('perm-' + cat);
+      if (sel && p[cat]) sel.value = p[cat];
+    }
+  } catch { /* no project open yet */ }
+}
+async function savePermissionsFromUI() {
+  const partial = {};
+  for (const cat of ['read', 'write', 'delete', 'execute', 'network', 'subagents']) {
+    const sel = document.getElementById('perm-' + cat);
+    if (sel) partial[cat] = sel.value;
+  }
+  await api.agent.setPermissions(partial);
+  toast('🔒 Permissions saved');
+}
+
+async function refreshVerifyConfigDisplay() {
+  const enabledEl = document.getElementById('ai-verify-enabled');
+  const cmdEl = document.getElementById('ai-verify-command');
+  if (!enabledEl) return;
+  try {
+    const cfg = await api.agent.getVerifyConfig();
+    enabledEl.checked = !!cfg.enabled;
+    cmdEl.value = cfg.command || '';
+  } catch { /* no project open yet */ }
+}
+async function saveVerifyConfigFromUI() {
+  const enabled = document.getElementById('ai-verify-enabled').checked;
+  const command = document.getElementById('ai-verify-command').value.trim();
+  await api.agent.setVerifyConfig({ enabled, command: command || null });
+  toast(enabled ? '✅ Auto-verify enabled' : '⏸️ Auto-verify disabled');
 }
 
 // ── Cost / token budget caps ────────────────────────────────────────────────
@@ -2642,6 +2703,12 @@ async function resetAgentUsage() {
   await api.agent.resetUsage();
   await refreshUsageDisplay();
   toast('🔄 Usage reset');
+}
+async function saveCompactionThreshold() {
+  const val = Number(document.getElementById('ai-compact-threshold').value || 50000);
+  compactAfterTokens = val > 0 ? val : 50000;
+  await api.ai.saveConfig({ compactAfterTokens });
+  toast('🗜️ Compaction threshold saved');
 }
 
 // Model field is always free text — suggestions only, never restricted, so
@@ -2739,9 +2806,9 @@ const AGENT_TOOLS = [
     parameters: { type:'object', properties:{ path:{type:'string'} }, required:['path'] } },
   { name: 'list_dir', description: 'List files/folders relative to the open project folder.',
     parameters: { type:'object', properties:{ path:{type:'string'} } } },
-  { name: 'write_file', description: 'Create a NEW file, or fully overwrite an existing one, relative to the project folder. For editing part of an existing file, prefer edit_file — it is safer and less likely to accidentally drop unrelated content. Critical files (.env, package.json, git internals, keys) require user approval.',
+  { name: 'write_file', description: 'Create a NEW file, or fully overwrite an existing one, relative to the project folder. For editing part of an existing file, prefer edit_file — it is safer and less likely to accidentally drop unrelated content. Critical files (.env, package.json, git internals, keys) require user approval. If the user has enabled auto-verify (Agent Settings), the result may include a `verification` field showing whether the project test command passed after this change — check it before claiming the change works.',
     parameters: { type:'object', properties:{ path:{type:'string'}, content:{type:'string'} }, required:['path','content'] } },
-  { name: 'edit_file', description: 'Make a precise, targeted edit to part of an existing file by replacing an exact snippet with a new one — the preferred way to modify existing code (safer than write_file, which replaces the whole file). old_str must match the file content EXACTLY, including whitespace, and must be unique in the file — include enough surrounding context (a few lines before/after) to make it unambiguous. If it is not unique or not found, you will get an error telling you so; re-read the file with read_file and try again with more context.',
+  { name: 'edit_file', description: 'Make a precise, targeted edit to part of an existing file by replacing an exact snippet with a new one — the preferred way to modify existing code (safer than write_file, which replaces the whole file). old_str must match the file content EXACTLY, including whitespace, and must be unique in the file — include enough surrounding context (a few lines before/after) to make it unambiguous. If it is not unique or not found, you will get an error telling you so; re-read the file with read_file and try again with more context. If the user has enabled auto-verify (Agent Settings), the result may include a `verification` field showing whether the project\'s test command passed after this change — check it before claiming the change works.',
     parameters: { type:'object', properties:{ path:{type:'string'}, old_str:{type:'string'}, new_str:{type:'string'} }, required:['path','old_str','new_str'] } },
   { name: 'delete_file', description: 'Delete a file relative to the project folder. Always requires user approval.',
     parameters: { type:'object', properties:{ path:{type:'string'} }, required:['path'] } },
@@ -2808,7 +2875,11 @@ async function execAgentTool(name, args, requestId) {
     case 'search_codebase': return await api.agent.ragSearch(args.query, 8);
     case 'web_search': return await api.agent.webSearch(args.query);
     case 'web_fetch':  return await api.agent.webFetch(args.url);
-    case 'spawn_subagents': return await runSubagentOrchestration(args.tasks || []);
+    case 'spawn_subagents': {
+      const gate = await api.agent.gateSubagents((args.tasks || []).length);
+      if (!gate.ok) return gate;
+      return await runSubagentOrchestration(args.tasks || []);
+    }
     default: return { ok:false, error:'Unknown tool: ' + name };
   }
 }
@@ -2895,16 +2966,26 @@ async function loadPersistedHistory() {
     const saved = JSON.parse(r.content);
     if (!Array.isArray(saved) || !saved.length) return;
     agentHistory.push(...saved);
-    appendChatMsg('system', `— resumed session (${saved.filter(m=>m.role==='user').length} previous messages) —`);
+    appendChatMsg('system', `— resumed session (${saved.filter(m=>m.role==='user' && !m.__compactionSummary).length} previous messages) —`);
     for (const m of saved) {
-      if (m.role === 'user') appendChatMsg('user', m.content);
+      if (m.__compactionSummary) appendChatMsg('system', '🗜️ ' + m.content);
+      else if (m.role === 'user') appendChatMsg('user', m.content);
       else if (m.role === 'assistant' && m.content) appendChatMsg('assistant', m.content);
     }
   } catch { /* corrupt/old session file, ignore */ }
 }
 function saveHistoryToDisk() {
   if (!currentFolder) return;
-  api.agent.writeFile('.liteide/agent-session.json', JSON.stringify(agentHistory.slice(-60), null, 2)).catch(()=>{});
+  // Keep the most recent 60 messages verbatim, same as before — but if a
+  // compaction summary sits earlier than that window, keep it too. It's the
+  // ONLY record of everything before it; losing it on a save-trim would
+  // silently erase context a resumed session actually needs.
+  let toSave = agentHistory.slice(-60);
+  const head = agentHistory[0];
+  if (agentHistory.length > 60 && head?.__compactionSummary && !toSave.includes(head)) {
+    toSave = [head, ...toSave];
+  }
+  api.agent.writeFile('.liteide/agent-session.json', JSON.stringify(toSave, null, 2)).catch(()=>{});
 }
 
 function appendChatMsg(role, text) {
@@ -2983,13 +3064,19 @@ function updateToolCard(el, name, args, result) {
       : name === 'read_file' ? (result.content || '').slice(0, 500)
       : name === 'run_command' ? (`[sandbox: ${result.sandboxType || 'unknown'}] ` + ((result.stdout || '') + (result.stderr || '')).slice(-500))
       : name === 'search_codebase' ? (result.results || []).map(r => `${r.file}:${r.start}`).join('\n')
-      : (name === 'edit_file' || name === 'write_file') ? (result.ok ? '✓ applied' + (result.critical ? ' (approved)' : '') : '')
+      : (name === 'edit_file' || name === 'write_file') ? (result.ok ? '✓ applied' + (result.critical ? ' (approved)' : '') + formatVerificationSummary(result.verification) : '')
       : JSON.stringify(result).slice(0, 500);
     if (summary) { pre.textContent = summary; el.appendChild(pre); }
   }
   document.getElementById('ai-chat-log').scrollTop = document.getElementById('ai-chat-log').scrollHeight;
 }
 function escapeHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function formatVerificationSummary(v) {
+  if (!v) return '';
+  if (v.skipped) return `\n🗜️ verify: skipped (${v.reason})`;
+  if (v.timedOut) return `\n⏱️ verify: TIMED OUT running "${v.command}"`;
+  return v.ok ? `\n✅ verify: "${v.command}" passed` : `\n❌ verify: "${v.command}" FAILED (exit ${v.code})\n${(v.output || '').slice(-400)}`;
+}
 
 // ── Cancellation ──────────────────────────────────────────────────────────
 // Only one async agent operation (an AI call or a tool call) is ever
@@ -3003,6 +3090,71 @@ let agentStopRequested = false;
 function stopAgentLoop() {
   agentStopRequested = true;
   if (currentAgentRequestId) api.agent.cancelRequest(currentAgentRequestId);
+}
+
+// ── Context compaction ──────────────────────────────────────────────────────
+// agentHistory grows without bound over a long session — every tool call and
+// result stays in the array and gets resent to the model on EVERY loop
+// iteration. Left unchecked this eventually exceeds the model's context
+// window outright, and well before that, silently balloons cost/latency on
+// every single turn. Real compaction: once the ACTUAL input-token count the
+// provider just reported (not a heuristic — the real number from `usage`)
+// crosses a threshold, summarize every completed turn except the most recent
+// few into one synthetic message and splice it in place of what it replaces.
+//
+// The cut point is always exactly on a user-message boundary — a "turn" is
+// everything from one user message up to (not including) the next — because
+// that is the only place in the transcript guaranteed not to split an
+// assistant tool_use from its paired tool_result. Anthropic (and most
+// providers) will hard-error if a tool_use block's matching tool_result is
+// missing from the messages array, so any other cut point risks breaking the
+// very next request instead of shrinking it.
+const KEEP_RECENT_USER_TURNS = 3;
+let compactAfterTokens = 50000;
+
+function findUserTurnBoundaries(history) {
+  const idx = [];
+  history.forEach((m, i) => { if (m.role === 'user' && !m.__compactionSummary) idx.push(i); });
+  return idx;
+}
+
+function serializeMessageForSummary(m) {
+  if (m.role === 'user') return m.__compactionSummary ? `[EARLIER SUMMARY]\n${m.content}` : `USER: ${m.content}`;
+  if (m.role === 'assistant') {
+    const calls = (m.toolCalls || []).map(tc => `  \u2192 called ${tc.name}(${JSON.stringify(tc.args).slice(0, 200)})`).join('\n');
+    return `ASSISTANT: ${m.content || ''}${calls ? '\n' + calls : ''}`.trim();
+  }
+  if (m.role === 'tool') return `  \u2190 ${m.name} result: ${String(m.content).slice(0, 300)}`;
+  return '';
+}
+
+const COMPACTION_PROMPT = 'Summarize the following coding-agent session transcript into a concise technical brief for the SAME agent to continue from. Preserve: every file created/modified/deleted and why, key decisions and their reasoning, unresolved TODOs or open questions, and any important facts discovered (bugs found, constraints, project structure). Omit pleasantries and do not restate anything verbatim beyond what is necessary. Target 200-400 words, plain prose, no headers.';
+
+// Returns true if compaction actually happened. Best-effort: if the
+// summarization call itself errors, aborts, or hits the budget cap,
+// agentHistory is left untouched rather than risking data loss.
+async function maybeCompactHistory(provider, model) {
+  const boundaries = findUserTurnBoundaries(agentHistory);
+  if (boundaries.length <= KEEP_RECENT_USER_TURNS) return false; // not enough turns to bother
+  const cutAt = boundaries[boundaries.length - KEEP_RECENT_USER_TURNS];
+  if (cutAt <= 0) return false; // already starts at (or before) the keep-window
+
+  const toCompact = agentHistory.slice(0, cutAt);
+  const transcript = toCompact.map(serializeMessageForSummary).filter(Boolean).join('\n');
+  const res = await api.ai.chatOnce({
+    provider, model,
+    messages: [{ role: 'user', content: COMPACTION_PROMPT + '\n\n---TRANSCRIPT---\n' + transcript }],
+    tools: [], systemPrompt: '',
+  });
+  if (res.error || res.aborted || res.budgetExceeded || !res.text) return false;
+
+  const summaryMsg = {
+    role: 'user', __compactionSummary: true,
+    content: `[Compacted summary of ${toCompact.length} earlier messages \u2014 condensed to stay within context/budget limits]\n\n${res.text}`,
+  };
+  agentHistory.splice(0, cutAt, summaryMsg);
+  if (res.cumulativeUsage) refreshUsageDisplay();
+  return true;
 }
 
 async function sendAgentMessage() {
@@ -3076,6 +3228,13 @@ async function runAgentLoop() {
       }
       if (agentStopRequested) break;
       if (iterations === 11) { appendChatMsg('system', '⚠️ Stopping after 12 steps — ask a follow-up to continue.'); break; }
+
+      if (res.usage && res.usage.inputTokens >= compactAfterTokens) {
+        appendChatMsg('system', `🗜️ Context is large (${res.usage.inputTokens.toLocaleString()} input tokens ≥ ${compactAfterTokens.toLocaleString()} threshold) — compacting older turns…`);
+        const compacted = await maybeCompactHistory(provider, model);
+        appendChatMsg('system', compacted ? '✅ Compacted — older turns condensed into a summary.' : '⚠️ Compaction skipped (summarization call failed, was cancelled, or hit the budget cap) — continuing with full history.');
+      }
+
       thinkingEl = showThinking(); // model will react to the tool results next loop
     }
   } catch (e) {
@@ -3152,7 +3311,7 @@ function showApprovalModal(req) {
     return; // the pending tool card already visible in chat will update itself with the auto-approved result
   }
   pendingApprovalId = req?.id;
-  const titles = { write_file:'Write to critical file', delete_file:'Delete file', run_command:'Run risky command' };
+  const titles = { write_file:'Write to critical file', delete_file:'Delete file', run_command:'Run risky command', read_file:'Read file (permission: ask)', web_search:'Search the web (permission: ask)', web_fetch:'Fetch a URL (permission: ask)', spawn_subagents:'Spawn parallel sub-agents (permission: ask)' };
   document.getElementById('ac-title-text').textContent = titles[req?.action] || `Approval needed (${req?.action || 'unknown action'})`;
   let detailText = req?.detail?.path ? `Path: ${req.detail.path}` : req?.detail?.command ? `Command: ${req.detail.command}` : '';
   if (!detailText && req?.detail) detailText = JSON.stringify(req.detail); // never render truly blank

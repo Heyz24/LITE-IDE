@@ -496,14 +496,17 @@ function loadAiConfig() {
           : Buffer.from(raw.keys[provider], 'base64').toString('utf8');
       } catch { /* corrupted/undecryptable entry, skip */ }
     }
-    return { provider: raw.provider || 'anthropic', model: raw.model || '', ollamaUrl: raw.ollamaUrl || 'http://localhost:11434', keys };
+    return {
+      provider: raw.provider || 'anthropic', model: raw.model || '', ollamaUrl: raw.ollamaUrl || 'http://localhost:11434',
+      compactAfterTokens: raw.compactAfterTokens ?? 50000, keys,
+    };
   } catch {
-    return { provider: 'anthropic', model: '', ollamaUrl: 'http://localhost:11434', keys: {} };
+    return { provider: 'anthropic', model: '', ollamaUrl: 'http://localhost:11434', compactAfterTokens: 50000, keys: {} };
   }
 }
 
 function saveAiConfig(cfg) {
-  const out = { provider: cfg.provider, model: cfg.model, ollamaUrl: cfg.ollamaUrl, keys: {} };
+  const out = { provider: cfg.provider, model: cfg.model, ollamaUrl: cfg.ollamaUrl, compactAfterTokens: cfg.compactAfterTokens, keys: {} };
   for (const provider of Object.keys(cfg.keys || {})) {
     const val = cfg.keys[provider];
     if (!val) continue;
@@ -518,7 +521,7 @@ ipcMain.handle('ai:getConfig', async () => {
   const cfg = loadAiConfig();
   // Never leak raw keys to renderer — just booleans of which are set
   return {
-    provider: cfg.provider, model: cfg.model, ollamaUrl: cfg.ollamaUrl,
+    provider: cfg.provider, model: cfg.model, ollamaUrl: cfg.ollamaUrl, compactAfterTokens: cfg.compactAfterTokens,
     hasKey: Object.fromEntries(Object.keys(cfg.keys).map(k => [k, !!cfg.keys[k]])),
   };
 });
@@ -528,6 +531,7 @@ ipcMain.handle('ai:saveConfig', async (_, partial) => {
   if (partial.provider) cfg.provider = partial.provider;
   if (partial.model !== undefined) cfg.model = partial.model;
   if (partial.ollamaUrl) cfg.ollamaUrl = partial.ollamaUrl;
+  if (partial.compactAfterTokens !== undefined) cfg.compactAfterTokens = partial.compactAfterTokens;
   if (partial.keys) Object.assign(cfg.keys, partial.keys);
   saveAiConfig(cfg);
   return true;
@@ -718,6 +722,104 @@ ipcMain.on('agent:cancelRequest', (_, requestId) => {
   if (proc) killCommandProcess(proc);
 });
 
+// ── Test-after-edit auto-verification ───────────────────────────────────────
+// The skill file already tells the model "never report success without a
+// tool call proving it" — this enforces the same principle at the tool
+// layer instead of relying on model discipline alone. When enabled, a
+// successful write_file/edit_file on a code file automatically runs the
+// project's test command (sandboxed, same as run_command) and the result
+// comes back as part of THAT SAME tool call's result — no extra round trip,
+// no reliance on the model remembering to check.
+//
+// Off by default: auto-running a project's full test suite after every
+// single edit is exactly the kind of surprising, potentially slow/expensive
+// behavior that should be opt-in, not force-enabled the moment a command is
+// detected. Detection still runs on project open so the UI can offer a
+// pre-filled suggestion.
+const CODE_EXTENSIONS = new Set([
+  '.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.py', '.go', '.rs', '.java',
+  '.c', '.cc', '.cpp', '.h', '.hpp', '.rb', '.php', '.cs', '.kt', '.swift', '.scala', '.m', '.mm',
+]);
+
+function detectTestCommand(root) {
+  try {
+    if (fs.existsSync(path.join(root, 'package.json'))) {
+      const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+      const t = pkg.scripts?.test;
+      if (t && !/no test specified/i.test(t)) return 'npm test';
+    }
+  } catch { /* malformed package.json — fall through to other detectors */ }
+  if (fs.existsSync(path.join(root, 'Cargo.toml'))) return 'cargo test';
+  if (fs.existsSync(path.join(root, 'go.mod'))) return 'go test ./...';
+  if (fs.existsSync(path.join(root, 'pyproject.toml')) || fs.existsSync(path.join(root, 'pytest.ini')) || fs.existsSync(path.join(root, 'setup.cfg'))) return 'python -m pytest -q';
+  if (fs.existsSync(path.join(root, 'pom.xml'))) return 'mvn -q -DskipITs test';
+  if (fs.existsSync(path.join(root, 'build.gradle')) || fs.existsSync(path.join(root, 'build.gradle.kts'))) return (IS_WIN ? 'gradlew.bat' : './gradlew') + ' test';
+  return null;
+}
+
+function verifyConfigPath() { return path.join(projectRoot, '.liteide', 'agent-verify.json'); }
+function loadVerifyConfig() {
+  try { return JSON.parse(fs.readFileSync(verifyConfigPath(), 'utf8')); }
+  catch { return { enabled: false, command: null, timeoutMs: 60000, debounceMs: 15000 }; }
+}
+function saveVerifyConfig(cfg) {
+  fs.mkdirSync(path.dirname(verifyConfigPath()), { recursive: true });
+  fs.writeFileSync(verifyConfigPath(), JSON.stringify(cfg, null, 2), 'utf8');
+}
+
+ipcMain.handle('agent:getVerifyConfig', async () => (projectRoot ? loadVerifyConfig() : { enabled: false, command: null, timeoutMs: 60000, debounceMs: 15000 }));
+ipcMain.handle('agent:setVerifyConfig', async (_, partial) => {
+  if (!projectRoot) throw new Error('No project folder open');
+  const cfg = loadVerifyConfig();
+  if (partial.enabled !== undefined) cfg.enabled = !!partial.enabled;
+  if (partial.command !== undefined) cfg.command = partial.command || null;
+  if (partial.timeoutMs !== undefined) cfg.timeoutMs = partial.timeoutMs;
+  if (partial.debounceMs !== undefined) cfg.debounceMs = partial.debounceMs;
+  saveVerifyConfig(cfg);
+  return cfg;
+});
+
+// Same sandbox construction agent:runCommand uses, plus a hard timeout —
+// a hung test suite must not hang the whole agent loop indefinitely.
+async function runSandboxedWithTimeout(cmd, timeoutMs) {
+  const sh = IS_WIN ? 'cmd' : 'bash';
+  const flag = IS_WIN ? '/c' : '-c';
+  const built = sandbox.buildSandboxedCommand(cmd, { projectRoot, env: process.env, shell: sh, shellFlag: flag, allowNetwork: false });
+  return await new Promise(resolve => {
+    const child = spawn(built.command, built.args, { cwd: projectRoot, env: built.env, detached: !IS_WIN });
+    let out = '', timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; killCommandProcess(child); }, timeoutMs);
+    child.stdout.on('data', d => { out += d.toString(); });
+    child.stderr.on('data', d => { out += d.toString(); });
+    child.on('close', code => {
+      clearTimeout(timer);
+      if (built.cleanup) built.cleanup();
+      resolve({ ok: code === 0 && !timedOut, code, timedOut, output: out.slice(-4000), sandboxType: built.sandboxType });
+    });
+    child.on('error', e => {
+      clearTimeout(timer);
+      if (built.cleanup) built.cleanup();
+      resolve({ ok: false, error: e.message, timedOut: false });
+    });
+  });
+}
+
+let lastVerifyAt = 0;
+async function maybeRunVerification(relPath) {
+  if (!projectRoot) return null;
+  const cfg = loadVerifyConfig();
+  if (!cfg.enabled || !cfg.command) return null;
+  if (!CODE_EXTENSIONS.has(path.extname(relPath).toLowerCase())) return null;
+  const debounceMs = cfg.debounceMs ?? 15000;
+  const now = Date.now();
+  if (now - lastVerifyAt < debounceMs) {
+    return { skipped: true, reason: `debounced — a verification run happened within the last ${Math.round(debounceMs / 1000)}s; it will run again once that window passes` };
+  }
+  lastVerifyAt = now;
+  const result = await runSandboxedWithTimeout(cfg.command, cfg.timeoutMs ?? 60000);
+  return { skipped: false, command: cfg.command, ...result };
+}
+
 // Single normalized entry point used by the renderer's agent loop.
 // `messages`: [{role:'user'|'assistant'|'tool', content, tool_call_id?, name?}]
 // `requestId` (optional): lets the renderer cancel this specific in-flight
@@ -783,6 +885,68 @@ function resolveInProject(relPath) {
   if (!abs.startsWith(path.resolve(projectRoot))) throw new Error('Path escapes project folder — blocked');
   return abs;
 }
+
+// ── Granular per-tool-category permission toggles ───────────────────────────
+// A coarser, user-controlled layer UNDER the existing critical-file/
+// critical-command pattern gates above — both must pass, this doesn't
+// replace them. Categories map to natural tool groupings:
+//   read       — read_file, list_dir, search_codebase (ragSearch)
+//   write      — write_file, edit_file (critical-file patterns still apply independently)
+//   delete     — delete_file
+//   execute    — run_command (critical-command patterns still apply independently)
+//   network    — web_search, web_fetch
+//   subagents  — spawn_subagents (gates the fan-out itself; each spawned
+//                sub-agent's own tool calls are still separately gated by
+//                whichever category they individually fall under)
+// Each category is one of:
+//   'allow' — proceeds silently (still subject to the finer-grained critical
+//             patterns for write/execute, which are independent of this)
+//   'ask'   — always prompts for approval, unconditionally, even for a file/
+//             command that wouldn't otherwise be flagged as critical
+//   'deny'  — blocked outright, no prompt, no execution
+// Defaults intentionally reproduce pre-existing behavior exactly — installing
+// this feature must not silently change what an existing project allows.
+const PERMISSION_CATEGORIES = ['read', 'write', 'delete', 'execute', 'network', 'subagents'];
+function defaultPermissions() { return { read: 'allow', write: 'allow', delete: 'ask', execute: 'allow', network: 'allow', subagents: 'allow' }; }
+function permissionsPath() { return path.join(projectRoot, '.liteide', 'agent-permissions.json'); }
+function loadPermissions() {
+  try { return { ...defaultPermissions(), ...JSON.parse(fs.readFileSync(permissionsPath(), 'utf8')) }; }
+  catch { return defaultPermissions(); }
+}
+function savePermissions(p) {
+  fs.mkdirSync(path.dirname(permissionsPath()), { recursive: true });
+  fs.writeFileSync(permissionsPath(), JSON.stringify(p, null, 2), 'utf8');
+}
+function checkCategoryPermission(category) {
+  if (!projectRoot) return 'allow';
+  return loadPermissions()[category] || 'allow';
+}
+
+ipcMain.handle('agent:getPermissions', async () => (projectRoot ? loadPermissions() : defaultPermissions()));
+ipcMain.handle('agent:setPermissions', async (_, partial) => {
+  if (!projectRoot) throw new Error('No project folder open');
+  const p = loadPermissions();
+  for (const cat of PERMISSION_CATEGORIES) if (partial[cat]) p[cat] = partial[cat];
+  savePermissions(p);
+  return p;
+});
+
+// spawn_subagents' own orchestration happens entirely in the renderer (it
+// fans out into several parallel ai:chatOnce loops directly, there's no
+// single main-process call to hang a gate off of) — this lets the renderer
+// check+prompt through the SAME approval mechanism as every other gated
+// tool before it starts that fan-out. Each spawned sub-agent's individual
+// tool calls still go through the normal read/write/execute/network gates
+// above regardless of this check.
+ipcMain.handle('agent:gateSubagents', async (_, taskCount) => {
+  const perm = checkCategoryPermission('subagents');
+  if (perm === 'deny') return { ok: false, error: 'Blocked by permission settings (subagents is set to deny)' };
+  if (perm === 'ask') {
+    const approved = await requestApproval('spawn_subagents', { taskCount });
+    if (!approved) return { ok: false, error: 'Denied by user' };
+  }
+  return { ok: true };
+});
 
 // ── Cost / token budget caps ────────────────────────────────────────────────
 // Per-project (not per-app) — a hobby project and a client project reasonably
@@ -886,9 +1050,9 @@ function requestApproval(action, detail) {
 
 // ── Universal Coding Agent skill — seeded into every project, provider-agnostic ──
 const UNIVERSAL_SKILL_NAME = 'universal-coding-agent.md';
-const UNIVERSAL_SKILL_VERSION = '1.2.0';
-const UNIVERSAL_SKILL_CONTENT = `<!-- LiteIDE Universal Coding Agent Skill — v1.2.0 -->
-# Universal Coding Agent Skill — v1.2.0
+const UNIVERSAL_SKILL_VERSION = '1.5.0';
+const UNIVERSAL_SKILL_CONTENT = `<!-- LiteIDE Universal Coding Agent Skill — v1.5.0 -->
+# Universal Coding Agent Skill — v1.5.0
 
 Provider-agnostic core discipline. Applies identically whether you are Claude, GPT, Gemini, or a local Ollama model — this is plain instruction text, not a provider-specific feature. Every directive below is a hard rule, not a suggestion, unless marked "prefer."
 
@@ -935,11 +1099,12 @@ Provider-agnostic core discipline. Applies identically whether you are Claude, G
 
 ## 6. Terminal access — real, visible, multi-session
 - The IDE has real multi-session terminals (PowerShell/CMD/Bash/zsh/WSL), not a sandboxed fake shell.
-- \`run_in_terminal\` targets the terminal tab the user currently has focused/visible — they see every character.
-- \`run_command\` is the isolated/background alternative — use it for quick checks you don't need the user to watch.
+- \`run_in_terminal\` targets the terminal tab the user currently has focused/visible — they see every character. It is NOT OS-sandboxed — it runs with the same access the user's own terminal has, by design, since the user is watching it live.
+- \`run_command\` is the isolated/background alternative — use it for quick checks you don't need the user to watch. On Linux/macOS it runs inside a real OS-level sandbox (bubblewrap/Seatbelt): read access everywhere, write access ONLY inside the project folder, no network by default. On Windows it's hardened (jailed to the project folder, minimal env) but not syscall-sandboxed — see the \`sandboxType\`/\`sandboxed\` fields on every result if you need to know which applies. This does not change what you should attempt — never rely on the sandbox to justify a command you wouldn't otherwise run; it's a safety net, not permission to be less careful.
 - Never assume a terminal is in a particular directory — the working directory is the opened project root; \`cd\` explicitly in the command if you need elsewhere.
 - Long-running/interactive processes (servers, watchers, REPLs) belong in \`run_in_terminal\`, never in \`run_command\` — background execution has no interactive stdin path.
 - Destructive shell patterns (\`rm -rf\`, force-push, \`sudo\`, disk-level commands) are approval-gated by design — do not attempt to route around this via a different tool.
+- If a \`run_command\` result has \`cancelled: true\`, the user pressed Stop mid-execution. Do not silently retry the same command — acknowledge it was stopped and ask what they'd like next, unless they've already told you to continue.
 
 ## 7. Permission boundary
 - \`.env\`, \`package.json\`, git internals, and key files trigger approval by design — this is a safety feature, never an obstacle to engineer around.
@@ -967,7 +1132,37 @@ Provider-agnostic core discipline. Applies identically whether you are Claude, G
 ## 11. Failure honesty
 - A tool/compiler/interpreter not installed → say exactly that, name the missing tool, don't silently skip the step.
 - A test that fails → show the real failure output, don't paraphrase it away.
-- A task partially done → say precisely how far you got and what remains, never imply full completion.\n\n## 12. Auto-checkpointing (v1.2.0)\n- Every successful write_file/edit_file/delete_file is committed to git automatically, one commit per change, if the project is a git repo. You do not need to run git commit yourself for routine changes \u2014 doing so is redundant and can create duplicate/conflicting commits.\n- This means every change you make already has a clean rollback point via git log / git revert \u2014 act with that safety net in mind, but it does not lower the bar for the approval-gated actions in section 7; those rules are unchanged.\n- If the project is not a git repo, checkpointing is silently skipped \u2014 this is expected, not an error, and needs no special handling from you.
+- A task partially done → say precisely how far you got and what remains, never imply full completion.
+
+## 12. Auto-checkpointing (v1.2.0)
+- Every successful write_file/edit_file/delete_file is committed to git automatically, one commit per change, if the project is a git repo. You do not need to run git commit yourself for routine changes — doing so is redundant and can create duplicate/conflicting commits.
+- This means every change you make already has a clean rollback point via git log / git revert — act with that safety net in mind, but it does not lower the bar for the approval-gated actions in section 7; those rules are unchanged.
+- If the project is not a git repo, checkpointing is silently skipped — this is expected, not an error, and needs no special handling from you.
+
+## 13. Cancellation (v1.3.0)
+- The user can press Stop at any point — this aborts whatever single call is currently in flight (an AI call or a \`run_command\`) and stops the loop from starting anything new after it.
+- If your own response comes back as \`{aborted: true}\`, that call was cancelled — do not treat it as an error to work around, just stop.
+- Never fight cancellation by immediately re-issuing the same call — if the user wanted it retried they will say so.
+
+## 14. Cost/token budget caps (v1.3.0)
+- The user may configure a per-project token and/or dollar cap. If a call to you returns \`{budgetExceeded: true, reason}\`, no further AI calls will succeed until the user raises the cap or resets usage — say the reason back to them plainly and stop; do not attempt another tool call expecting it to "get through."
+- This is a hard external limit, not a suggestion to be more token-efficient — being concise is still good practice on its own merits, but it will not bypass a hit cap.
+
+## 15. Context compaction (v1.3.0)
+- On long sessions, older turns get automatically summarized into a single condensed message once the transcript grows large, to stay within context/budget limits. You may see a message near the start of your history that looks like \`[Compacted summary of N earlier messages ...]\` — treat its contents as ground truth about what already happened (files touched, decisions made, open TODOs), the same as if you remembered it directly. Do not re-do work described as already complete in a compaction summary without checking first.
+- Compaction only happens between your turns, never mid-tool-call, and it never removes the current, most recent turns — only older, already-completed ones.
+
+## 16. Test-after-edit auto-verification (v1.4.0)
+- If the user has enabled auto-verify (Agent Settings), a successful \`write_file\` or \`edit_file\` on a code file may come back with an extra \`verification\` field showing whether the project's configured test command passed — this is the SAME tool call's result, not a separate step you need to remember to trigger.
+- \`verification.skipped === true\` means it did not run this time (debounced, or the edited file type isn't covered) — this is not a pass or a fail, treat it as "unknown," not as confirmation the change works.
+- \`verification.ok === false\` is a real failure (or a real timeout if \`verification.timedOut\`) — do not report the edit as successful. Read \`verification.output\`, diagnose, and fix it, the same as if the user had pasted you a failing test run.
+- If verification is not enabled at all (no \`verification\` field present), nothing has validated your change automatically — the honesty rules in section 11 still apply in full: don't imply something is tested when it hasn't been.
+
+## 17. Per-category permission toggles (v1.5.0)
+- The user can set each tool category (read, write, delete, execute, network, subagents) to allow / ask / deny independently, on top of the existing critical-file and critical-command approval rules — both layers apply, neither replaces the other.
+- If a tool call returns an error mentioning "Blocked by permission settings," that category is set to deny — do not retry the same call, do not try a different tool as a workaround to achieve the same effect (e.g. don't shell out via run_command to read a file if read is denied), and tell the user plainly what's blocked.
+- If a category is set to ask, expect an approval prompt on every call in that category, even for something that would normally be silent (e.g. reading an ordinary file) — this is intentional caution the user configured, not a bug.
+- delete has no fully-silent mode by design — even with delete set to allow, you will still see an approval prompt for every delete_file call. Only delete: deny changes that.
 `;
 
 // Seeds the skill on first project open. On later opens, if the on-disk file
@@ -994,12 +1189,27 @@ function ensureUniversalSkillSeeded() {
   }
 }
 
-ipcMain.handle('agent:setProjectRoot', async (_, root) => { projectRoot = root; ensureUniversalSkillSeeded(); return true; });
+ipcMain.handle('agent:setProjectRoot', async (_, root) => {
+  projectRoot = root;
+  ensureUniversalSkillSeeded();
+  lastVerifyAt = 0;
+  try {
+    if (!fs.existsSync(verifyConfigPath())) {
+      saveVerifyConfig({ enabled: false, command: detectTestCommand(root), timeoutMs: 60000, debounceMs: 15000 });
+    }
+  } catch { /* best-effort — verification config is optional, never block project open on it */ }
+  return true;
+});
 
 
 // Tool: read file (always silent — needed for RAG/context)
 ipcMain.handle('agent:readFile', async (_, relPath) => {
-  try { return { ok: true, content: fs.readFileSync(resolveInProject(relPath), 'utf8') }; }
+  try {
+    const perm = checkCategoryPermission('read');
+    if (perm === 'deny') return { ok: false, error: 'Blocked by permission settings (read is set to deny)' };
+    if (perm === 'ask') { const approved = await requestApproval('read_file', { path: relPath }); if (!approved) return { ok: false, error: 'Denied by user' }; }
+    return { ok: true, content: fs.readFileSync(resolveInProject(relPath), 'utf8') };
+  }
   catch (e) { return { ok: false, error: e.message }; }
 });
 
@@ -1007,6 +1217,9 @@ ipcMain.handle('agent:readFile', async (_, relPath) => {
 ipcMain.handle('agent:listDir', async (_, relPath = '.') => {
   const IGNORE = new Set(['.git','node_modules','__pycache__','dist','build','.cache']);
   try {
+    const perm = checkCategoryPermission('read');
+    if (perm === 'deny') return { ok: false, error: 'Blocked by permission settings (read is set to deny)' };
+    if (perm === 'ask') { const approved = await requestApproval('read_file', { path: relPath }); if (!approved) return { ok: false, error: 'Denied by user' }; }
     const abs = resolveInProject(relPath);
     function walk(p, depth = 0) {
       if (depth > 5) return [];
@@ -1022,15 +1235,18 @@ ipcMain.handle('agent:listDir', async (_, relPath = '.') => {
 // Tool: write/create file — gated if critical
 ipcMain.handle('agent:writeFile', async (_, relPath, content) => {
   try {
+    const permWrite = checkCategoryPermission('write');
+    if (permWrite === 'deny') return { ok: false, error: 'Blocked by permission settings (write is set to deny)' };
     const critical = isCriticalFile(relPath);
-    if (critical) {
+    if (critical || permWrite === 'ask') {
       const approved = await requestApproval('write_file', { path: relPath, preview: content.slice(0, 400) });
       if (!approved) return { ok: false, error: 'Denied by user' };
     }
     const abs = resolveInProject(relPath);
     fs.mkdirSync(path.dirname(abs), { recursive: true });
     fs.writeFileSync(abs, content, 'utf8');
-    return { ok: true, critical };
+    const verification = await maybeRunVerification(relPath);
+    return { ok: true, critical, ...(verification ? { verification } : {}) };
   } catch (e) { return { ok: false, error: e.message }; }
 });
 
@@ -1040,6 +1256,8 @@ ipcMain.handle('agent:writeFile', async (_, relPath, content) => {
 // spot, the same discipline real coding-agent edit tools enforce.
 ipcMain.handle('agent:editFile', async (_, relPath, oldStr, newStr) => {
   try {
+    const permWrite = checkCategoryPermission('write');
+    if (permWrite === 'deny') return { ok: false, error: 'Blocked by permission settings (write is set to deny)' };
     const abs = resolveInProject(relPath);
     if (!fs.existsSync(abs)) return { ok: false, error: `File not found: ${relPath}` };
     const content = fs.readFileSync(abs, 'utf8');
@@ -1048,18 +1266,26 @@ ipcMain.handle('agent:editFile', async (_, relPath, oldStr, newStr) => {
     if (occurrences > 1) return { ok: false, error: `old_str appears ${occurrences} times — include more surrounding context to target one exact spot` };
     const next = content.replace(oldStr, () => newStr); // function form avoids $-pattern substitution surprises
     const critical = isCriticalFile(relPath);
-    if (critical) {
+    if (critical || permWrite === 'ask') {
       const approved = await requestApproval('write_file', { path: relPath, preview: newStr.slice(0, 400) });
       if (!approved) return { ok: false, error: 'Denied by user' };
     }
     fs.writeFileSync(abs, next, 'utf8');
-    return { ok: true, critical };
+    const verification = await maybeRunVerification(relPath);
+    return { ok: true, critical, ...(verification ? { verification } : {}) };
   } catch (e) { return { ok: false, error: e.message }; }
 });
 
-// Tool: delete file — always gated (destructive)
+// Tool: delete file — 'deny' blocks outright; otherwise ALWAYS confirms
+// (destructive-by-nature — the permission category can only make this
+// stricter or fully block it, never make it silent; that would be too easy
+// to regret). Default category is 'ask', matching pre-existing behavior
+// exactly; there is intentionally no way to make deletes silent via this
+// gate, on top of it — 'allow' vs 'ask' are equivalent for this one category.
 ipcMain.handle('agent:deleteFile', async (_, relPath) => {
   try {
+    const perm = checkCategoryPermission('delete');
+    if (perm === 'deny') return { ok: false, error: 'Blocked by permission settings (delete is set to deny)' };
     const approved = await requestApproval('delete_file', { path: relPath });
     if (!approved) return { ok: false, error: 'Denied by user' };
     fs.unlinkSync(resolveInProject(relPath));
@@ -1077,8 +1303,10 @@ ipcMain.handle('agent:deleteFile', async (_, relPath) => {
 // yet — interim hardening: jailed cwd + minimal env only).
 ipcMain.handle('agent:runCommand', async (_, cmd, opts = {}) => {
   try {
+    const permExec = checkCategoryPermission('execute');
+    if (permExec === 'deny') return { ok: false, error: 'Blocked by permission settings (execute is set to deny)' };
     const critical = isCriticalCommand(cmd);
-    if (critical) {
+    if (critical || permExec === 'ask') {
       const approved = await requestApproval('run_command', { command: cmd });
       if (!approved) return { ok: false, error: 'Denied by user' };
     }
@@ -1282,6 +1510,9 @@ function tokenize(s) { return (s.toLowerCase().match(/[a-z0-9_]{3,}/g) || []); }
 
 ipcMain.handle('agent:ragSearch', async (_, query, topK = 8) => {
   if (!projectRoot) return { ok: false, error: 'No project folder open' };
+  const perm = checkCategoryPermission('read');
+  if (perm === 'deny') return { ok: false, error: 'Blocked by permission settings (read is set to deny)' };
+  if (perm === 'ask') { const approved = await requestApproval('read_file', { path: `search: ${query}` }); if (!approved) return { ok: false, error: 'Denied by user' }; }
   const qTokens = new Set(tokenize(query));
   if (!qTokens.size) return { ok: true, results: [] };
   const files = ragCollectFiles(projectRoot).slice(0, 2000); // sanity cap
@@ -1301,6 +1532,65 @@ ipcMain.handle('agent:ragSearch', async (_, query, topK = 8) => {
   }
   scored.sort((a, b) => b.score - a.score);
   return { ok: true, results: scored.slice(0, topK) };
+});
+
+// ── web_search / web_fetch ───────────────────────────────────────────────────
+// NOTE: these were declared as agent tools and routed in the renderer
+// (api.agent.webSearch/webFetch) but never actually implemented here or in
+// preload.js — calling either would have thrown "not a function" at runtime.
+// Fixed as part of wiring these into the permission-toggle "network"
+// category, since a toggle gating tools that don't exist isn't meaningful.
+//
+// DuckDuckGo's HTML-only endpoint (no JS, no API key) via lightweight regex
+// extraction rather than a proper HTML parser — deliberate, to keep this a
+// zero-new-dependency change consistent with the rest of the project. This
+// is inherently more fragile than a real DOM parser if DuckDuckGo changes
+// their markup; if search results start coming back empty, check that first.
+function stripHtml(html) {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+ipcMain.handle('agent:webSearch', async (_, query) => {
+  if (!query || !query.trim()) return { ok: false, error: 'Empty query' };
+  const perm = checkCategoryPermission('network');
+  if (perm === 'deny') return { ok: false, error: 'Blocked by permission settings (network is set to deny)' };
+  if (perm === 'ask') { const approved = await requestApproval('web_search', { query }); if (!approved) return { ok: false, error: 'Denied by user' }; }
+  try {
+    const res = await fetch('https://html.duckduckgo.com/html/?q=' + encodeURIComponent(query), {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; LiteIDE-Agent/1.0)' },
+    });
+    const html = await res.text();
+    const results = [];
+    const re = /<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
+    let m;
+    while ((m = re.exec(html)) && results.length < 8) {
+      results.push({ url: m[1], title: stripHtml(m[2]), snippet: stripHtml(m[3]) });
+    }
+    return { ok: true, results };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
+
+ipcMain.handle('agent:webFetch', async (_, url) => {
+  if (!/^https?:\/\//i.test(url || '')) return { ok: false, error: 'URL must start with http:// or https://' };
+  const perm = checkCategoryPermission('network');
+  if (perm === 'deny') return { ok: false, error: 'Blocked by permission settings (network is set to deny)' };
+  if (perm === 'ask') { const approved = await requestApproval('web_fetch', { path: url }); if (!approved) return { ok: false, error: 'Denied by user' }; }
+  try {
+    const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; LiteIDE-Agent/1.0)' } });
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.includes('text') && !contentType.includes('html') && !contentType.includes('json')) {
+      return { ok: false, error: `Unsupported content-type for text extraction: ${contentType}` };
+    }
+    const raw = await res.text();
+    const text = contentType.includes('html') ? stripHtml(raw) : raw;
+    return { ok: true, content: text.slice(0, 15000), truncated: text.length > 15000 };
+  } catch (e) { return { ok: false, error: e.message }; }
 });
 
 // ── Skills: user-supplied .md files the agent can read on demand ────────────

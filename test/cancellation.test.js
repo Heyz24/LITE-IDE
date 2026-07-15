@@ -84,10 +84,17 @@ describe('Cancellation propagation', () => {
 
   test('agent:runCommand: cancelling a long-running command actually kills the real child process', async () => {
     const requestId = 'req-cmd-1';
-    // `sleep` isn't a real command on Windows cmd.exe — node is guaranteed
-    // present (this is a Node/Electron project) and setTimeout blocks the
-    // same way cross-platform.
-    const longRunningCmd = 'node -e "setTimeout(()=>{}, 30000)"';
+    // Deliberately NOT using `node -e "...(...)..."` inline here: on Windows,
+    // cmd.exe's own re-quoting of a /c argument that already contains
+    // double quotes and parens is fragile (this bit us for real — the
+    // process exited near-instantly on a syntax error from mangled
+    // quoting, before the cancel ever had anything to kill, producing a
+    // false "not cancelled" failure that had nothing to do with
+    // cancellation itself). A real script file sidesteps shell quoting
+    // entirely and is the more realistic test anyway.
+    const scriptPath = path.join(projectDir, '__sleep_test.js');
+    fs.writeFileSync(scriptPath, 'setTimeout(() => {}, 30000);\n', 'utf8');
+    const longRunningCmd = 'node __sleep_test.js';
     const pending = mock.handleFns.get('agent:runCommand')(EVT, longRunningCmd, { requestId });
     await new Promise(r => setTimeout(r, 500)); // let the shell actually spawn node
     mock.onFns.get('agent:cancelRequest')[0](EVT, requestId);
