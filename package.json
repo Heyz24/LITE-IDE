@@ -10,7 +10,7 @@
     "dev": "electron . --dev",
     "dist": "node build.js",
     "postinstall": "electron-builder install-app-deps",
-    "test": "node --test test/wiring.test.js test/backend.test.js test/ai-providers.test.js test/sandbox.test.js test/cancellation.test.js test/budget.test.js test/compaction.test.js test/verification.test.js test/web-tools.test.js test/permissions.test.js test/terminal.test.js"
+    "test": "node --test test/wiring.test.js test/backend.test.js test/ai-providers.test.js test/sandbox.test.js test/cancellation.test.js test/budget.test.js test/compaction.test.js test/verification.test.js test/web-tools.test.js test/permissions.test.js test/escalation.test.js test/terminal.test.js"
   },
 
   "build": {
@@ -34,6 +34,7 @@
     "files": [
       "main.js",
       "preload.js",
+      "agent-sandbox.js",
       "src/**/*",
       "package.json",
       "node_modules/**/*",

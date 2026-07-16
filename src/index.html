@@ -2824,6 +2824,8 @@ const AGENT_TOOLS = [
     parameters: { type:'object', properties:{ url:{type:'string'} }, required:['url'] } },
   { name: 'spawn_subagents', description: 'Delegate one or more independent sub-tasks to fresh sub-agents that run in parallel, each with their own read/write/run/search tools scoped to this project. Use this to fan out real parallel work (e.g. "write tests for file A" + "update docs for file B" at the same time). Each sub-agent runs to completion (or up to 8 steps) and returns a short result. Do not spawn sub-agents for trivial single steps — do those yourself directly.',
     parameters: { type:'object', properties:{ tasks:{ type:'array', items:{ type:'string' }, description:'One instruction string per sub-agent to spawn in parallel.' } }, required:['tasks'] } },
+  { name: 'request_permission_escalation', description: 'Call this ONLY after a tool call has actually failed with a "Blocked by permission settings" error. Explain briefly why you need that category of access to continue. This surfaces a real approval prompt to the user — it does not grant access itself, and never grants more than "ask" (every subsequent call in that category will still individually prompt), and only for this session, never saved. Do not call this speculatively before being blocked, and do not call it repeatedly for the same category after a denial.',
+    parameters: { type:'object', properties:{ category:{ type:'string', enum:['read','write','delete','execute','network','subagents'] }, reason:{ type:'string' } }, required:['category','reason'] } },
 ];
 
 // Fire-and-forget so committing never slows down the agent's tool-call loop.
@@ -2880,6 +2882,7 @@ async function execAgentTool(name, args, requestId) {
       if (!gate.ok) return gate;
       return await runSubagentOrchestration(args.tasks || []);
     }
+    case 'request_permission_escalation': return await api.agent.requestPermissionEscalation(args.category, args.reason);
     default: return { ok:false, error:'Unknown tool: ' + name };
   }
 }
@@ -3311,7 +3314,7 @@ function showApprovalModal(req) {
     return; // the pending tool card already visible in chat will update itself with the auto-approved result
   }
   pendingApprovalId = req?.id;
-  const titles = { write_file:'Write to critical file', delete_file:'Delete file', run_command:'Run risky command', read_file:'Read file (permission: ask)', web_search:'Search the web (permission: ask)', web_fetch:'Fetch a URL (permission: ask)', spawn_subagents:'Spawn parallel sub-agents (permission: ask)' };
+  const titles = { write_file:'Write to critical file', delete_file:'Delete file', run_command:'Run risky command', read_file:'Read file (permission: ask)', web_search:'Search the web (permission: ask)', web_fetch:'Fetch a URL (permission: ask)', spawn_subagents:'Spawn parallel sub-agents (permission: ask)', permission_escalation:'Agent is requesting elevated access' };
   document.getElementById('ac-title-text').textContent = titles[req?.action] || `Approval needed (${req?.action || 'unknown action'})`;
   let detailText = req?.detail?.path ? `Path: ${req.detail.path}` : req?.detail?.command ? `Command: ${req.detail.command}` : '';
   if (!detailText && req?.detail) detailText = JSON.stringify(req.detail); // never render truly blank

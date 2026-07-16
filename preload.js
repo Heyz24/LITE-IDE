@@ -86,6 +86,7 @@ contextBridge.exposeInMainWorld('api', {
     getPermissions: ()              => ipcRenderer.invoke('agent:getPermissions'),
     setPermissions: (perms)         => ipcRenderer.invoke('agent:setPermissions', perms),
     gateSubagents:  taskCount       => ipcRenderer.invoke('agent:gateSubagents', taskCount),
+    requestPermissionEscalation: (category, reason) => ipcRenderer.invoke('agent:requestPermissionEscalation', category, reason),
     respondApproval:(id, approved)  => ipcRenderer.send('agent:approvalResponse', { id, approved }),
     onApprovalRequest: cb           => ipcRenderer.on('agent:approvalRequest', (_, req) => cb(req)),
     onCommandOutput:   cb           => ipcRenderer.on('agent:commandOutput', (_, d) => cb(d)),

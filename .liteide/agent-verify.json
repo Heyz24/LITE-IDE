@@ -1,6 +1,0 @@
-{
-  "enabled": false,
-  "command": "npm test",
-  "timeoutMs": 60000,
-  "debounceMs": 15000
-}

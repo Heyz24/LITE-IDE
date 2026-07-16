@@ -919,8 +919,14 @@ function savePermissions(p) {
 }
 function checkCategoryPermission(category) {
   if (!projectRoot) return 'allow';
+  const override = sessionPermissionOverrides.get(category);
+  if (override) return override;
   return loadPermissions()[category] || 'allow';
 }
+// Session-only (never persisted) escalations, e.g. deny -> ask after the
+// model explicitly asks and the user approves. Reset per project so a
+// stale escalation from a previous project never carries over.
+const sessionPermissionOverrides = new Map();
 
 ipcMain.handle('agent:getPermissions', async () => (projectRoot ? loadPermissions() : defaultPermissions()));
 ipcMain.handle('agent:setPermissions', async (_, partial) => {
@@ -946,6 +952,24 @@ ipcMain.handle('agent:gateSubagents', async (_, taskCount) => {
     if (!approved) return { ok: false, error: 'Denied by user' };
   }
   return { ok: true };
+});
+
+// Model-requestable permission escalation — instead of a `deny` just
+// failing silently forever, the model can explicitly ask for temporary
+// access with a stated reason. Approval, if granted, only ever moves
+// deny -> ask (never straight to a fully-silent allow, even on approval —
+// bounds how much a single approval click can grant) and is SESSION-ONLY:
+// it lives in sessionPermissionOverrides above, not in the persisted
+// .liteide/agent-permissions.json, so it evaporates on restart or project
+// switch rather than silently loosening the project's saved settings.
+ipcMain.handle('agent:requestPermissionEscalation', async (_, category, reason) => {
+  if (!PERMISSION_CATEGORIES.includes(category)) return { ok: false, error: `Unknown permission category: ${category}` };
+  const current = checkCategoryPermission(category);
+  if (current !== 'deny') return { ok: true, alreadyAllowed: true, currentLevel: current };
+  const approved = await requestApproval('permission_escalation', { category, reason: reason || '(no reason given)' });
+  if (!approved) return { ok: false, error: 'Escalation denied by user' };
+  sessionPermissionOverrides.set(category, 'ask');
+  return { ok: true, newLevel: 'ask', note: 'Escalated to "ask" for the rest of this session only — every call in this category will still prompt for approval, and this is not saved to disk.' };
 });
 
 // ── Cost / token budget caps ────────────────────────────────────────────────
@@ -1050,9 +1074,9 @@ function requestApproval(action, detail) {
 
 // ── Universal Coding Agent skill — seeded into every project, provider-agnostic ──
 const UNIVERSAL_SKILL_NAME = 'universal-coding-agent.md';
-const UNIVERSAL_SKILL_VERSION = '1.5.0';
-const UNIVERSAL_SKILL_CONTENT = `<!-- LiteIDE Universal Coding Agent Skill — v1.5.0 -->
-# Universal Coding Agent Skill — v1.5.0
+const UNIVERSAL_SKILL_VERSION = '1.6.0';
+const UNIVERSAL_SKILL_CONTENT = `<!-- LiteIDE Universal Coding Agent Skill — v1.6.0 -->
+# Universal Coding Agent Skill — v1.6.0
 
 Provider-agnostic core discipline. Applies identically whether you are Claude, GPT, Gemini, or a local Ollama model — this is plain instruction text, not a provider-specific feature. Every directive below is a hard rule, not a suggestion, unless marked "prefer."
 
@@ -1163,6 +1187,12 @@ Provider-agnostic core discipline. Applies identically whether you are Claude, G
 - If a tool call returns an error mentioning "Blocked by permission settings," that category is set to deny — do not retry the same call, do not try a different tool as a workaround to achieve the same effect (e.g. don't shell out via run_command to read a file if read is denied), and tell the user plainly what's blocked.
 - If a category is set to ask, expect an approval prompt on every call in that category, even for something that would normally be silent (e.g. reading an ordinary file) — this is intentional caution the user configured, not a bug.
 - delete has no fully-silent mode by design — even with delete set to allow, you will still see an approval prompt for every delete_file call. Only delete: deny changes that.
+
+## 18. Requesting elevated access, and edit_file recovery (v1.6.0)
+- If you get blocked by permission settings and genuinely need that access to continue, you may call \`request_permission_escalation\` ONCE with a brief honest reason — this surfaces a real prompt to the user, it does not grant anything itself. If denied, stop trying that category for the rest of this task and say so plainly. Do not call it speculatively before actually being blocked, and do not call it repeatedly for the same category.
+- An approved escalation only ever reaches "ask" (never a silent "allow"), lasts only for this session, and is never saved to disk — the user's saved settings are untouched.
+- \`edit_file\` failures (old_str not found, or ambiguous) now include the file's current content directly in the error (\`currentContent\`) — use that to correct your next attempt instead of making a separate read_file call first.
+- \`search_codebase\` may return \`capped: true\` on very large projects (2000+ files) — this means the scan didn't cover the whole repo; treat results as partial and narrow your query or fall back to \`run_command\` with grep for an exact-match sweep of the full tree.
 `;
 
 // Seeds the skill on first project open. On later opens, if the on-disk file
@@ -1193,6 +1223,7 @@ ipcMain.handle('agent:setProjectRoot', async (_, root) => {
   projectRoot = root;
   ensureUniversalSkillSeeded();
   lastVerifyAt = 0;
+  sessionPermissionOverrides.clear();
   try {
     if (!fs.existsSync(verifyConfigPath())) {
       saveVerifyConfig({ enabled: false, command: detectTestCommand(root), timeoutMs: 60000, debounceMs: 15000 });
@@ -1262,8 +1293,8 @@ ipcMain.handle('agent:editFile', async (_, relPath, oldStr, newStr) => {
     if (!fs.existsSync(abs)) return { ok: false, error: `File not found: ${relPath}` };
     const content = fs.readFileSync(abs, 'utf8');
     const occurrences = content.split(oldStr).length - 1;
-    if (occurrences === 0) return { ok: false, error: 'old_str not found in file — re-read the file, it may have changed' };
-    if (occurrences > 1) return { ok: false, error: `old_str appears ${occurrences} times — include more surrounding context to target one exact spot` };
+    if (occurrences === 0) return { ok: false, error: 'old_str not found in file — it may have changed since you last read it', currentContent: content.slice(0, 6000), truncated: content.length > 6000 };
+    if (occurrences > 1) return { ok: false, error: `old_str appears ${occurrences} times — include more surrounding context to target one exact spot`, currentContent: content.slice(0, 6000), truncated: content.length > 6000 };
     const next = content.replace(oldStr, () => newStr); // function form avoids $-pattern substitution surprises
     const critical = isCriticalFile(relPath);
     if (critical || permWrite === 'ask') {
@@ -1515,7 +1546,10 @@ ipcMain.handle('agent:ragSearch', async (_, query, topK = 8) => {
   if (perm === 'ask') { const approved = await requestApproval('read_file', { path: `search: ${query}` }); if (!approved) return { ok: false, error: 'Denied by user' }; }
   const qTokens = new Set(tokenize(query));
   if (!qTokens.size) return { ok: true, results: [] };
-  const files = ragCollectFiles(projectRoot).slice(0, 2000); // sanity cap
+  const allFiles = ragCollectFiles(projectRoot);
+  const RAG_FILE_CAP = 2000;
+  const capped = allFiles.length > RAG_FILE_CAP;
+  const files = allFiles.slice(0, RAG_FILE_CAP);
   const scored = [];
   for (const file of files) {
     let content;
@@ -1531,7 +1565,11 @@ ipcMain.handle('agent:ragSearch', async (_, query, topK = 8) => {
     }
   }
   scored.sort((a, b) => b.score - a.score);
-  return { ok: true, results: scored.slice(0, topK) };
+  return {
+    ok: true, results: scored.slice(0, topK),
+    ...(capped ? { capped: true, filesScanned: RAG_FILE_CAP, totalFilesInProject: allFiles.length,
+      warning: `Only scanned ${RAG_FILE_CAP} of ${allFiles.length} files in this project — results may be incomplete. Consider a more specific query, or use run_command with grep/ripgrep for an exact-match search across the full tree.` } : {}),
+  };
 });
 
 // ── web_search / web_fetch ───────────────────────────────────────────────────
