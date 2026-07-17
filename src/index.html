@@ -1040,7 +1040,7 @@ html, body {
         </div>
         <div class="ai-settings-row" id="ai-perm-row" title="Per-category permissions: allow = silent, ask = always confirm, deny = blocked outright. Sits underneath the existing critical-file/critical-command confirmations, which still apply independently.">
           <span style="font-size:11px;color:var(--t3)">Permissions:</span>
-          <select id="perm-read" class="ai-key-input" style="width:90px" onchange="savePermissionsFromUI()" title="read_file, list_dir, search_codebase"><option value="allow">read: allow</option><option value="ask">read: ask</option><option value="deny">read: deny</option></select>
+          <select id="perm-read" class="ai-key-input" style="width:90px" onchange="savePermissionsFromUI()" title="read_file, list_dir, search_codebase, grep_codebase"><option value="allow">read: allow</option><option value="ask">read: ask</option><option value="deny">read: deny</option></select>
           <select id="perm-write" class="ai-key-input" style="width:95px" onchange="savePermissionsFromUI()" title="write_file, edit_file"><option value="allow">write: allow</option><option value="ask">write: ask</option><option value="deny">write: deny</option></select>
           <select id="perm-delete" class="ai-key-input" style="width:100px" onchange="savePermissionsFromUI()" title="delete_file — allow still confirms, only deny is silent-free"><option value="allow">delete: allow</option><option value="ask">delete: ask</option><option value="deny">delete: deny</option></select>
           <select id="perm-execute" class="ai-key-input" style="width:105px" onchange="savePermissionsFromUI()" title="run_command"><option value="allow">execute: allow</option><option value="ask">execute: ask</option><option value="deny">execute: deny</option></select>
@@ -2788,6 +2788,7 @@ async function runAgentSelfTest() {
     ['write_file',      { path: testFile, content: 'LiteIDE agent self-test @ ' + new Date().toISOString() } ],
     ['read_file',       { path: testFile }                            ],
     ['search_codebase', { query: 'function' }                         ],
+    ['grep_codebase',   { pattern: 'LiteIDE agent self-test', path: '.liteide' } ],
     ['run_command',     { command: IS_WIN_UI ? 'echo agent-selftest-ok' : 'echo agent-selftest-ok' } ],
     ['delete_file',     { path: testFile }                            ],
   ];
@@ -2796,7 +2797,7 @@ async function runAgentSelfTest() {
     appendToolCard(name, args, result);
     if (result.ok === false) { appendChatMsg('system', `❌ Self-test failed at "${name}": ${result.error}`); return; }
   }
-  appendChatMsg('system', '✅ Self-test passed — read, write, delete, run_command and RAG search all work against this project.');
+  appendChatMsg('system', '✅ Self-test passed — read, write, delete, run_command, RAG search, and grep search all work against this project.');
 }
 const IS_WIN_UI = navigator.userAgent.includes('Windows');
 
@@ -2818,11 +2819,13 @@ const AGENT_TOOLS = [
     parameters: { type:'object', properties:{ command:{type:'string'} }, required:['command'] } },
   { name: 'search_codebase', description: 'Keyword/RAG search across the project\'s text files — use this before guessing file contents or locations.',
     parameters: { type:'object', properties:{ query:{type:'string'} }, required:['query'] } },
+  { name: 'grep_codebase', description: 'Exact-match (or regex) line-level search across the project — the companion to search_codebase. Use this instead of search_codebase when you need every occurrence of a specific symbol, string, import, or exact phrase (e.g. "every call site of parseConfig", "every file importing lodash") — RAG scoring can bury or miss a rare exact match, this tool cannot. Backed by ripgrep when installed (fast, .gitignore-aware), falls back to a slower pure-JS scan otherwise — check the `engine` field on the result if you need to know which ran. Defaults to a literal/fixed-string match (set fixed_strings:false for a real regex pattern). Results are capped at 300 matches (check `truncated`); narrow the pattern or use `path` to scope to a subdirectory if you hit the cap.',
+    parameters: { type:'object', properties:{ pattern:{type:'string'}, path:{type:'string', description:'Optional subdirectory (relative to project root) to scope the search to.'}, fixed_strings:{type:'boolean', description:'Default true — treat pattern as a literal string, not regex. Set false to use pattern as a regex.'}, case_sensitive:{type:'boolean', description:'Default false (case-insensitive).'} }, required:['pattern'] } },
   { name: 'web_search', description: 'Search the web for current information — documentation, error messages, package/API references, current best practices. Use when the answer depends on something outside this codebase or your training data (e.g. a library\'s current API, a specific error message, current versions).',
     parameters: { type:'object', properties:{ query:{type:'string'} }, required:['query'] } },
   { name: 'web_fetch', description: 'Fetch the content of a specific URL (e.g. one found via web_search, or a docs page the user gave you). Returns readable text extracted from the page.',
     parameters: { type:'object', properties:{ url:{type:'string'} }, required:['url'] } },
-  { name: 'spawn_subagents', description: 'Delegate one or more independent sub-tasks to fresh sub-agents that run in parallel, each with their own read/write/run/search tools scoped to this project. Use this to fan out real parallel work (e.g. "write tests for file A" + "update docs for file B" at the same time). Each sub-agent runs to completion (or up to 8 steps) and returns a short result. Do not spawn sub-agents for trivial single steps — do those yourself directly.',
+  { name: 'spawn_subagents', description: 'Delegate one or more independent sub-tasks to fresh sub-agents that run in parallel, each with their own read/write/run/search tools scoped to this project. Use this to fan out real parallel work (e.g. "write tests for file A" + "update docs for file B" at the same time). Each sub-agent runs to completion (or up to 8 steps) and returns a short result. Do not spawn sub-agents for trivial single steps — do those yourself directly. Sub-agents may themselves call spawn_subagents to delegate further (useful when a sub-task turns out to have independent pieces of its own), up to a hard depth limit of 2 levels below you — a sub-agent at the deepest level cannot spawn further. There is also a hard cap of 12 total sub-agents across the whole tree regardless of depth/fanout, shared across every spawn_subagents call in this task; once exhausted, further calls are refused with a clear error rather than silently truncating.',
     parameters: { type:'object', properties:{ tasks:{ type:'array', items:{ type:'string' }, description:'One instruction string per sub-agent to spawn in parallel.' } }, required:['tasks'] } },
   { name: 'request_permission_escalation', description: 'Call this ONLY after a tool call has actually failed with a "Blocked by permission settings" error. Explain briefly why you need that category of access to continue. This surfaces a real approval prompt to the user — it does not grant access itself, and never grants more than "ask" (every subsequent call in that category will still individually prompt), and only for this session, never saved. Do not call this speculatively before being blocked, and do not call it repeatedly for the same category after a denial.',
     parameters: { type:'object', properties:{ category:{ type:'string', enum:['read','write','delete','execute','network','subagents'] }, reason:{ type:'string' } }, required:['category','reason'] } },
@@ -2875,12 +2878,26 @@ async function execAgentTool(name, args, requestId) {
       return { ok:true, terminal:t.name, note:`Sent to visible terminal "${t.name}" — output streams live in the terminal panel, not returned here.` };
     }
     case 'search_codebase': return await api.agent.ragSearch(args.query, 8);
+    case 'grep_codebase': return await api.agent.grepCodebase(args.pattern, { path: args.path, fixed_strings: args.fixed_strings, case_sensitive: args.case_sensitive });
     case 'web_search': return await api.agent.webSearch(args.query);
     case 'web_fetch':  return await api.agent.webFetch(args.url);
     case 'spawn_subagents': {
-      const gate = await api.agent.gateSubagents((args.tasks || []).length);
-      if (!gate.ok) return gate;
-      return await runSubagentOrchestration(args.tasks || []);
+      const depth = args.__depth || 0;
+      if (depth >= MAX_SUBAGENT_DEPTH) return { ok: false, error: `Recursion depth cap reached (max ${MAX_SUBAGENT_DEPTH} levels below the top-level agent) — this sub-agent cannot spawn further sub-agents. Do the remaining work directly instead.` };
+      const tasks = (args.tasks || []).filter(Boolean).slice(0, 4);
+      if (!tasks.length) return { ok: false, error: 'No tasks provided' };
+      // Shared tree-wide budget: reserve BEFORE the first await (gateSubagents
+      // is async) so two spawn_subagents calls racing at different points in
+      // the same tree can't both read a stale "remaining" count and jointly
+      // overspend the cap.
+      const tree = args.__tree || { spawnedCount: { value: 0 }, stopped: { value: false } };
+      const remaining = MAX_SUBAGENTS_PER_TREE - tree.spawnedCount.value;
+      if (remaining <= 0) return { ok: false, error: `Sub-agent budget for this task tree is exhausted (max ${MAX_SUBAGENTS_PER_TREE} total across all levels) — do the remaining work directly instead of spawning more.` };
+      const cappedTasks = tasks.slice(0, Math.min(4, remaining));
+      tree.spawnedCount.value += cappedTasks.length;
+      const gate = await api.agent.gateSubagents(cappedTasks.length);
+      if (!gate.ok) { tree.spawnedCount.value -= cappedTasks.length; return gate; } // release the reservation if denied
+      return await runSubagentOrchestration(cappedTasks, depth + 1, tree);
     }
     case 'request_permission_escalation': return await api.agent.requestPermissionEscalation(args.category, args.reason);
     default: return { ok:false, error:'Unknown tool: ' + name };
@@ -2889,19 +2906,32 @@ async function execAgentTool(name, args, requestId) {
 
 // ── Multi-agent orchestrator: spawn N isolated sub-agents, run them in true
 // parallel (Promise.all), stream their tool activity into their own cards,
-// and despawn (dispose their loop) the moment each finishes. ────────────────
+// and despawn (dispose their loop) the moment each finishes. Recursion:
+// a sub-agent may itself call spawn_subagents (see execAgentTool's
+// 'spawn_subagents' case) up to MAX_SUBAGENT_DEPTH levels below the
+// top-level agent, sharing one MAX_SUBAGENTS_PER_TREE budget across the
+// whole tree regardless of depth — both caps exist purely to bound cost;
+// without them a misbehaving model could recursively fan out unboundedly. ──
+const MAX_SUBAGENT_DEPTH = 2;       // top-level agent = depth 0; depth 1 and depth 2 sub-agents may exist; depth 2 cannot spawn further
+const MAX_SUBAGENTS_PER_TREE = 12;  // shared across every spawn_subagents call anywhere in the tree, not per-call
 let subagentCounter = 0;
-async function runSubagentOrchestration(tasks) {
+async function runSubagentOrchestration(tasks, depth = 1, tree = null) {
   tasks = (tasks || []).filter(Boolean).slice(0, 4); // sane cap on parallelism/cost
   if (!tasks.length) return { ok:false, error:'No tasks provided' };
+  if (!tree) tree = { spawnedCount: { value: tasks.length }, stopped: { value: false } }; // defensive: reserve here too if called directly, bypassing execAgentTool's reservation
   const provider = document.getElementById('ai-provider-sel').value;
   const model = document.getElementById('ai-model-input').value.trim();
-  const subTools = AGENT_TOOLS.filter(t => t.name !== 'spawn_subagents'); // no recursive spawning
+  // Depth cap enforced two ways: the tool isn't even offered to a sub-agent
+  // that has hit the cap (here), and execAgentTool's own case independently
+  // re-checks depth before recursing (defense in depth, in case a
+  // non-structured-tool-calling model tries to invoke it via the
+  // extractToolCallFromText fallback parser despite it being absent from `tools`).
+  const subTools = depth >= MAX_SUBAGENT_DEPTH ? AGENT_TOOLS.filter(t => t.name !== 'spawn_subagents') : AGENT_TOOLS;
   const log = document.getElementById('ai-chat-log');
 
   const headerCard = document.createElement('div');
   headerCard.className = 'ai-tool-card';
-  headerCard.innerHTML = `<div class="th">🧬 spawn_subagents</div><div>${tasks.length} sub-agent(s) starting in parallel…</div>`;
+  headerCard.innerHTML = `<div class="th">🧬 spawn_subagents${depth > 1 ? ` (depth ${depth})` : ''}</div><div>${tasks.length} sub-agent(s) starting in parallel…</div>`;
   log.appendChild(headerCard); log.scrollTop = log.scrollHeight;
 
   async function runOne(taskText) {
@@ -2917,7 +2947,13 @@ async function runSubagentOrchestration(tasks) {
     let finalText = '';
     try {
       for (let step = 0; step < 8; step++) {
-        const res = await api.ai.chatOnce({ provider, model, messages: history, tools: subTools, systemPrompt: sysPrompt });
+        if (agentStopRequested || tree.stopped.value) { finalText = '⏹ Stopped by user.'; break; }
+        const reqId = crypto.randomUUID();
+        activeTreeRequestIds.add(reqId);
+        const res = await api.ai.chatOnce({ provider, model, messages: history, tools: subTools, systemPrompt: sysPrompt, requestId: reqId });
+        activeTreeRequestIds.delete(reqId);
+        if (res.aborted) { finalText = '⏹ Stopped by user.'; break; }
+        if (res.budgetExceeded) { finalText = '💰 ' + res.reason; break; }
         if (res.error) { finalText = '⚠️ ' + res.error; break; }
         let toolCalls = res.toolCalls;
         if ((!toolCalls || !toolCalls.length) && res.text) {
@@ -2928,13 +2964,34 @@ async function runSubagentOrchestration(tasks) {
         if (res.text) finalText = res.text;
         if (!toolCalls || !toolCalls.length) break;
         for (const call of toolCalls) {
+          if (agentStopRequested || tree.stopped.value) { finalText = (finalText || '') + '\n⏹ Stopped before running remaining tool calls.'; break; }
           const stepEl = document.createElement('div');
           stepEl.style.cssText = 'font-size:10.5px;color:var(--t3);margin-top:3px;';
           stepEl.textContent = `⏳ ${call.name}(${JSON.stringify(call.args).slice(0,90)}) — waiting for approval…`;
           card.appendChild(stepEl);
-          const result = await execAgentTool(call.name, call.args);
+          const toolReqId = crypto.randomUUID();
+          activeTreeRequestIds.add(toolReqId);
+          // Only spawn_subagents needs the recursion context — attach it
+          // to a shallow copy so it never leaks into the tool card display
+          // or agentHistory (both use the ORIGINAL call.args, not this one).
+          const execArgs = call.name === 'spawn_subagents' ? { ...call.args, __depth: depth, __tree: tree } : call.args;
+          const result = await execAgentTool(call.name, execArgs, toolReqId);
+          activeTreeRequestIds.delete(toolReqId);
           stepEl.textContent = `↳ ${call.name}(${JSON.stringify(call.args).slice(0,90)})`;
           history.push({ role:'tool', name: call.name, tool_call_id: call.id, content: JSON.stringify(result) });
+          if (result.cancelled) tree.stopped.value = true;
+        }
+        // If cancellation happened during the tool-call loop above, stop the
+        // step loop right here — otherwise the next iteration's top-of-loop
+        // check would re-detect the same tree.stopped/agentStopRequested and
+        // overwrite whatever message was set with the generic one. Make sure
+        // SOME stopped-message is present even when only a single (not a
+        // multi-call batch) tool call was the one that got cancelled, since
+        // in that case the inner loop above never had a "remaining calls to
+        // skip" message to set.
+        if (agentStopRequested || tree.stopped.value) {
+          if (!/Stopped/.test(finalText || '')) finalText = (finalText || '') + '\n⏹ Stopped by user.';
+          break;
         }
       }
     } catch (e) { finalText = '⚠️ ' + (e.message || e); }
@@ -3038,7 +3095,7 @@ function updateToolCard(el, name, args, result) {
   const pending = result === null || result === undefined;
   const denied = !pending && result.ok === false && /denied/i.test(result.error || '');
   el.className = 'ai-tool-card' + (denied ? ' denied' : pending ? ' pending' : '');
-  const icon = denied ? '🚫' : pending ? '⏳' : { read_file:'📖', list_dir:'📁', write_file:'✏️', edit_file:'🩹', delete_file:'🗑️', run_command:'⚡', run_in_terminal:'🖥️', search_codebase:'🔎', spawn_subagents:'🧬' }[name] || '🔧';
+  const icon = denied ? '🚫' : pending ? '⏳' : { read_file:'📖', list_dir:'📁', write_file:'✏️', edit_file:'🩹', delete_file:'🗑️', run_command:'⚡', run_in_terminal:'🖥️', search_codebase:'🔎', grep_codebase:'🎯', spawn_subagents:'🧬' }[name] || '🔧';
   const filePath = args?.path || '';
   el.querySelector('.th').textContent = `${icon} ${name}${filePath ? ' — ' + filePath : ''}${pending ? ' (waiting for approval…)' : ''}`;
   el.querySelector('.args').textContent = (name === 'edit_file' || name === 'write_file') ? '' : Object.entries(args || {}).map(([k,v]) => `${k}=${typeof v==='string' && v.length>60 ? v.slice(0,60)+'…' : v}`).join(', ');
@@ -3067,6 +3124,7 @@ function updateToolCard(el, name, args, result) {
       : name === 'read_file' ? (result.content || '').slice(0, 500)
       : name === 'run_command' ? (`[sandbox: ${result.sandboxType || 'unknown'}] ` + ((result.stdout || '') + (result.stderr || '')).slice(-500))
       : name === 'search_codebase' ? (result.results || []).map(r => `${r.file}:${r.start}`).join('\n')
+      : name === 'grep_codebase' ? (`[${result.engine || 'unknown'}] ${(result.results||[]).length} match(es)${result.truncated ? ' (truncated)' : ''}\n` + (result.results || []).map(r => `${r.file}:${r.line}: ${r.text}`).join('\n'))
       : (name === 'edit_file' || name === 'write_file') ? (result.ok ? '✓ applied' + (result.critical ? ' (approved)' : '') + formatVerificationSummary(result.verification) : '')
       : JSON.stringify(result).slice(0, 500);
     if (summary) { pre.textContent = summary; el.appendChild(pre); }
@@ -3089,10 +3147,18 @@ function formatVerificationSummary(v) {
 // even once the in-flight call has been aborted.
 let currentAgentRequestId = null;
 let agentStopRequested = false;
+// Every in-flight requestId anywhere in an active spawn_subagents tree
+// (both chatOnce calls and tool calls made by sub-agents) — Stop needs to
+// cancel all of these too, not just the top-level request, or a sub-agent
+// tree keeps running invisibly after the user thinks they stopped it. This
+// was a real pre-existing gap: sub-agents never registered a requestId at
+// all before recursion made it necessary to actually stop a whole tree.
+let activeTreeRequestIds = new Set();
 
 function stopAgentLoop() {
   agentStopRequested = true;
   if (currentAgentRequestId) api.agent.cancelRequest(currentAgentRequestId);
+  for (const id of activeTreeRequestIds) api.agent.cancelRequest(id);
 }
 
 // ── Context compaction ──────────────────────────────────────────────────────

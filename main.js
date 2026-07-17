@@ -890,7 +890,7 @@ function resolveInProject(relPath) {
 // A coarser, user-controlled layer UNDER the existing critical-file/
 // critical-command pattern gates above — both must pass, this doesn't
 // replace them. Categories map to natural tool groupings:
-//   read       — read_file, list_dir, search_codebase (ragSearch)
+//   read       — read_file, list_dir, search_codebase (ragSearch), grep_codebase
 //   write      — write_file, edit_file (critical-file patterns still apply independently)
 //   delete     — delete_file
 //   execute    — run_command (critical-command patterns still apply independently)
@@ -1074,9 +1074,9 @@ function requestApproval(action, detail) {
 
 // ── Universal Coding Agent skill — seeded into every project, provider-agnostic ──
 const UNIVERSAL_SKILL_NAME = 'universal-coding-agent.md';
-const UNIVERSAL_SKILL_VERSION = '1.6.0';
-const UNIVERSAL_SKILL_CONTENT = `<!-- LiteIDE Universal Coding Agent Skill — v1.6.0 -->
-# Universal Coding Agent Skill — v1.6.0
+const UNIVERSAL_SKILL_VERSION = '1.8.0';
+const UNIVERSAL_SKILL_CONTENT = `<!-- LiteIDE Universal Coding Agent Skill — v1.8.0 -->
+# Universal Coding Agent Skill — v1.8.0
 
 Provider-agnostic core discipline. Applies identically whether you are Claude, GPT, Gemini, or a local Ollama model — this is plain instruction text, not a provider-specific feature. Every directive below is a hard rule, not a suggestion, unless marked "prefer."
 
@@ -1093,6 +1093,7 @@ Provider-agnostic core discipline. Applies identically whether you are Claude, G
 - \`write_file\` — new files only, or a deliberate full rewrite the user asked for.
 - \`read_file\` / \`list_dir\` — free, safe, use liberally, never skip.
 - \`search_codebase\` — keyword/RAG search before assuming a symbol/pattern doesn't exist.
+- \`grep_codebase\` — exact-match/regex line search when you need every occurrence of a specific symbol/string, not a relevance-ranked guess. Prefer this over \`search_codebase\` when you already know the exact text you're looking for.
 - \`run_command\` — isolated background execution; output returns to you, user doesn't see it live.
 - \`run_in_terminal\` — executes in the visible integrated terminal the user is looking at. Use for: dev servers, watch/build loops, long-running or interactive processes, anything the user should watch happen live. Does not block waiting for output — it streams into the terminal panel.
 - \`delete_file\` — deliberate only, always gated behind user approval. Never used to "explore."
@@ -1192,7 +1193,19 @@ Provider-agnostic core discipline. Applies identically whether you are Claude, G
 - If you get blocked by permission settings and genuinely need that access to continue, you may call \`request_permission_escalation\` ONCE with a brief honest reason — this surfaces a real prompt to the user, it does not grant anything itself. If denied, stop trying that category for the rest of this task and say so plainly. Do not call it speculatively before actually being blocked, and do not call it repeatedly for the same category.
 - An approved escalation only ever reaches "ask" (never a silent "allow"), lasts only for this session, and is never saved to disk — the user's saved settings are untouched.
 - \`edit_file\` failures (old_str not found, or ambiguous) now include the file's current content directly in the error (\`currentContent\`) — use that to correct your next attempt instead of making a separate read_file call first.
-- \`search_codebase\` may return \`capped: true\` on very large projects (2000+ files) — this means the scan didn't cover the whole repo; treat results as partial and narrow your query or fall back to \`run_command\` with grep for an exact-match sweep of the full tree.
+- \`search_codebase\` may return \`capped: true\` on very large projects (2000+ files) — this means the scan didn't cover the whole repo; treat results as partial and narrow your query or switch to \`grep_codebase\` for an exact-match sweep of the full tree (it has no file-count cap, only a match-count cap).
+
+## 19. Exact-match search — \`grep_codebase\` (v1.7.0)
+- Use \`grep_codebase\` when you need EVERY occurrence of a specific symbol, string, import, or exact phrase — e.g. "every call site of parseConfig", "every file importing lodash", "where is API_BASE_URL defined." \`search_codebase\` is relevance-ranked and can bury or drop a rare exact match; \`grep_codebase\` cannot, it returns every literal line that matches.
+- Defaults to a literal/fixed-string match, not regex — pass \`fixed_strings: false\` only if you deliberately want to write a regex pattern.
+- Results are capped at 300 matches; check \`truncated\` — if true, narrow the pattern or pass \`path\` to scope the search to a subdirectory rather than assuming those were the only matches.
+- The \`engine\` field on the result tells you which backend ran: \`"ripgrep"\` (fast, respects .gitignore-style ignores) or a fallback string starting with \`"fallback"\` (ripgrep isn't installed on this machine — still correct, just slower on very large trees). Either way the results themselves are equally trustworthy.
+
+## 20. Recursive sub-agents (v1.8.0)
+- \`spawn_subagents\` is no longer strictly one level deep — a sub-agent you spawn may itself call \`spawn_subagents\` to delegate further, up to 2 levels below the top-level agent. A sub-agent at the deepest allowed level will not have \`spawn_subagents\` in its own tool list at all, and if it tries anyway (e.g. via a text-based fallback parse) it gets a clear \`{ok:false}\` error, not a silent failure.
+- There is also a hard cap of 12 total sub-agents across the WHOLE tree, shared across every \`spawn_subagents\` call anywhere in it regardless of depth — not 12 per call. Once exhausted, further spawn attempts are refused with a clear error. If you hit this, do the remaining work directly instead of trying to spawn more.
+- Only delegate genuinely independent, parallelizable sub-tasks. Recursion is for when a sub-task turns out to have independent pieces of its own worth splitting further — it is not a substitute for just doing sequential work yourself.
+- Stopping the agent (the Stop button) now cancels an entire in-flight sub-agent tree, not just the top-level call — this was fixed as a prerequisite for allowing recursion at all.
 `;
 
 // Seeds the skill on first project open. On later opens, if the on-disk file
@@ -1568,8 +1581,126 @@ ipcMain.handle('agent:ragSearch', async (_, query, topK = 8) => {
   return {
     ok: true, results: scored.slice(0, topK),
     ...(capped ? { capped: true, filesScanned: RAG_FILE_CAP, totalFilesInProject: allFiles.length,
-      warning: `Only scanned ${RAG_FILE_CAP} of ${allFiles.length} files in this project — results may be incomplete. Consider a more specific query, or use run_command with grep/ripgrep for an exact-match search across the full tree.` } : {}),
+      warning: `Only scanned ${RAG_FILE_CAP} of ${allFiles.length} files in this project — results may be incomplete. Consider a more specific query, or use grep_codebase for an exact-match search across the full tree.` } : {}),
   };
+});
+
+// ── grep_codebase: ripgrep-backed exact/regex search ───────────────────────
+// Companion to search_codebase (fuzzy TF-IDF RAG, above). RAG is good for
+// "what part of the codebase is relevant to X" but scores by chunk-level
+// keyword overlap, so an exact symbol/string that's rare in its surrounding
+// chunk can get outscored and never surface. This tool does a real line-level
+// exact/regex sweep instead. Prefers the user's installed `rg` (ripgrep) —
+// fast, respects the same ignore patterns, and streams. Falls back to a
+// pure-JS walk when `rg` isn't on PATH, reusing the exact same
+// searchCollectFiles/buildSearchMatcher the editor's own Find-in-Project
+// panel already uses (search:project above) — so the tool always works,
+// just faster and more precise with ripgrep installed.
+let ripgrepAvailable = null; // cached after first probe; null = not yet probed this run
+function probeRipgrep() {
+  if (ripgrepAvailable !== null) return Promise.resolve(ripgrepAvailable);
+  return new Promise(resolve => {
+    let settled = false;
+    let probe;
+    try { probe = spawn('rg', ['--version']); }
+    catch { ripgrepAvailable = false; return resolve(false); }
+    probe.on('error', () => { if (!settled) { settled = true; ripgrepAvailable = false; resolve(false); } });
+    probe.on('close', code => { if (!settled) { settled = true; ripgrepAvailable = (code === 0); resolve(ripgrepAvailable); } });
+  });
+}
+
+const GREP_MAX_RESULTS = 300;
+const GREP_TIMEOUT_MS = 15000;
+const GREP_LINE_RX = /^(.*?):(\d+):(.*)$/;
+
+function grepViaRipgrep(pattern, opts) {
+  return new Promise(resolve => {
+    let cwd = projectRoot;
+    if (opts.scopePath) {
+      try { cwd = resolveInProject(opts.scopePath); }
+      catch (e) { return resolve({ ok: false, error: e.message }); }
+    }
+    const args = [
+      '--line-number', '--no-heading', '--color', 'never', '-m', '2000',
+      '--glob', '!.git/*', '--glob', '!node_modules/*', '--glob', '!.liteide/*',
+    ];
+    if (opts.fixedStrings) args.push('--fixed-strings');
+    if (!opts.caseSensitive) args.push('--ignore-case');
+    args.push('--', pattern, '.');
+    let child;
+    try { child = spawn('rg', args, { cwd }); }
+    catch (e) { return resolve({ ok: false, error: e.message }); }
+    let out = '', errOut = '';
+    const timer = setTimeout(() => { killCommandProcess(child); }, GREP_TIMEOUT_MS);
+    child.stdout.on('data', d => { out += d.toString(); });
+    child.stderr.on('data', d => { errOut += d.toString(); });
+    child.on('close', code => {
+      clearTimeout(timer);
+      // rg exit codes: 0 = matches found, 1 = no matches (not an error), 2 = real error (bad pattern, etc.)
+      if (code === 2) return resolve({ ok: false, error: errOut.trim() || 'ripgrep error', engine: 'ripgrep' });
+      const results = [];
+      for (const line of out.split('\n')) {
+        if (!line) continue;
+        const m = line.match(GREP_LINE_RX);
+        if (!m) continue;
+        const relFromCwd = m[1].replace(/^\.[\\/]/, '');
+        const abs = path.join(cwd, relFromCwd);
+        results.push({ file: path.relative(projectRoot, abs).replace(/\\/g, '/'), line: Number(m[2]), text: m[3].slice(0, 300) });
+        if (results.length >= GREP_MAX_RESULTS) break;
+      }
+      resolve({ ok: true, results, truncated: results.length >= GREP_MAX_RESULTS, engine: 'ripgrep' });
+    });
+    child.on('error', e => { clearTimeout(timer); resolve({ ok: false, error: e.message, engine: 'ripgrep' }); });
+  });
+}
+
+function grepViaFallback(pattern, opts) {
+  const rx = buildSearchMatcher(pattern, { regex: !opts.fixedStrings, caseSensitive: opts.caseSensitive, wholeWord: false });
+  if (!rx) return { ok: false, error: 'Invalid regex pattern' };
+  let root = projectRoot;
+  if (opts.scopePath) {
+    try { root = resolveInProject(opts.scopePath); }
+    catch (e) { return { ok: false, error: e.message }; }
+  }
+  const files = searchCollectFiles(root).slice(0, 5000);
+  const results = [];
+  outer:
+  for (const file of files) {
+    let stat;
+    try { stat = fs.statSync(file); } catch { continue; }
+    if (stat.size > SEARCH_MAX_FILE_BYTES) continue;
+    let content;
+    try { content = fs.readFileSync(file, 'utf8'); } catch { continue; }
+    if (content.includes('\u0000')) continue; // looks binary
+    const lines = content.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      rx.lastIndex = 0;
+      if (rx.test(lines[i])) {
+        results.push({ file: path.relative(projectRoot, file).replace(/\\/g, '/'), line: i + 1, text: lines[i].slice(0, 300) });
+        if (results.length >= GREP_MAX_RESULTS) break outer;
+      }
+    }
+  }
+  return { ok: true, results, truncated: results.length >= GREP_MAX_RESULTS, engine: 'fallback (ripgrep not found on PATH — install it for faster, .gitignore-aware search: https://github.com/BurntSushi/ripgrep#installation)' };
+}
+
+ipcMain.handle('agent:grepCodebase', async (_, pattern, opts = {}) => {
+  if (!projectRoot) return { ok: false, error: 'No project folder open' };
+  if (!pattern || !String(pattern).trim()) return { ok: false, error: 'Empty pattern' };
+  const perm = checkCategoryPermission('read');
+  if (perm === 'deny') return { ok: false, error: 'Blocked by permission settings (read is set to deny)' };
+  if (perm === 'ask') { const approved = await requestApproval('read_file', { path: `grep: ${pattern}` }); if (!approved) return { ok: false, error: 'Denied by user' }; }
+  const normalizedOpts = {
+    fixedStrings: opts.fixed_strings !== false, // default true — "exact" search is the point of this tool
+    caseSensitive: !!opts.case_sensitive,
+    scopePath: opts.path || null,
+  };
+  const hasRg = await probeRipgrep();
+  if (hasRg) {
+    const r = await grepViaRipgrep(pattern, normalizedOpts);
+    if (r.ok || r.error?.includes('escapes project folder')) return r; // real rg error (not "rg missing") — surface it, don't silently mask with a slower fallback
+  }
+  return grepViaFallback(pattern, normalizedOpts);
 });
 
 // ── web_search / web_fetch ───────────────────────────────────────────────────
@@ -1676,5 +1807,5 @@ ipcMain.on('open:external',    (_, url) => shell.openExternal(url));
 ipcMain.handle('app:platform', ()       => process.platform);
 ipcMain.handle('app:homedir',  ()       => os.homedir());
 
-module.exports = { buildCdCommand, extractLaunchFilePath, isCriticalFile, isCriticalCommand, winPathToWslPath, resolveShellCmd };
+module.exports = { buildCdCommand, extractLaunchFilePath, isCriticalFile, isCriticalCommand, winPathToWslPath, resolveShellCmd, UNIVERSAL_SKILL_VERSION };
 module.exports.sandbox = sandbox;

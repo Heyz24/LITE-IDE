@@ -245,7 +245,7 @@ describe('Backend IPC handlers (real main.js code, mocked Electron only)', () =>
     assert.ok(!list2.some(s => s.name === 'my_skill_.md'));
   });
 
-  test('the universal coding-agent skill is auto-seeded into every project on setProjectRoot', async () => {
+  test('the universal coding-agent skill is auto-seeded into every project on setProjectRoot, at the current version', async () => {
     // Explicit, self-contained re-seed, then poll rather than assert instantly.
     // On some Windows machines, antivirus real-time scanning of newly-created
     // files under the Temp folder can introduce a brief filesystem visibility
@@ -260,7 +260,16 @@ describe('Backend IPC handlers (real main.js code, mocked Electron only)', () =>
     }
     assert.ok(universal, 'universal-coding-agent.md should be auto-seeded (waited up to 1s for filesystem visibility)');
     const r = await mock.handleFns.get('agent:readFile')(EVT, universal.path);
-    assert.match(r.content, /v1\.2\.0/);
+    // Regression note: this used to assert /v1\.2\.0/, which kept "passing"
+    // for several version bumps for the wrong reason — v1.2.0 happens to
+    // also be the historical version marker on an unrelated older section
+    // header (auto-checkpointing) further down the same file, so the regex
+    // matched even after the file's actual top-of-file version moved on to
+    // v1.6.0, v1.7.0, etc. Checking against the real exported current
+    // version constant means this only passes when the seeded content is
+    // actually current.
+    assert.match(r.content, new RegExp(`Universal Coding Agent Skill — v${mock.exports.UNIVERSAL_SKILL_VERSION.replace(/\./g, '\\.')}`),
+      `seeded skill content's top-of-file version banner must match the current UNIVERSAL_SKILL_VERSION (${mock.exports.UNIVERSAL_SKILL_VERSION})`);
   });
 
   test('agent:checkpoint skips gracefully (not an error) when the project is not a git repo', async () => {
