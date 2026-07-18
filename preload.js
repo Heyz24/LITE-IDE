@@ -84,6 +84,8 @@ contextBridge.exposeInMainWorld('api', {
     resetUsage:     ()              => ipcRenderer.invoke('agent:resetUsage'),
     getVerifyConfig: ()             => ipcRenderer.invoke('agent:getVerifyConfig'),
     setVerifyConfig: (cfg)          => ipcRenderer.invoke('agent:setVerifyConfig', cfg),
+    getArchitectConfig: ()          => ipcRenderer.invoke('agent:getArchitectConfig'),
+    setArchitectConfig: (cfg)       => ipcRenderer.invoke('agent:setArchitectConfig', cfg),
     getPermissions: ()              => ipcRenderer.invoke('agent:getPermissions'),
     setPermissions: (perms)         => ipcRenderer.invoke('agent:setPermissions', perms),
     gateSubagents:  taskCount       => ipcRenderer.invoke('agent:gateSubagents', taskCount),

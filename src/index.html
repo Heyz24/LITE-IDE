@@ -1038,6 +1038,15 @@ html, body {
           <input id="ai-verify-command" class="ai-key-input" type="text" placeholder="test command (auto-detected)" style="width:220px">
           <button class="ai-save-btn" onclick="saveVerifyConfigFromUI()">Save</button>
         </div>
+        <div class="ai-settings-row" id="ai-architect-row" title="Aider-style fallback for weak/local models: if edit_file fails to match on the same file this many times in a row, a separate tool-call-free prompt (optionally a different/stronger model) is asked for one exact old_str/new_str pair instead of looping the same model through more blind retries.">
+          <label class="ai-autoapprove-label">
+            <input type="checkbox" id="ai-architect-enabled" onchange="saveArchitectConfigFromUI()" style="accent-color:var(--purple)"> Architect fallback
+          </label>
+          <input id="ai-architect-provider" class="ai-key-input" type="text" placeholder="provider (blank = same)" style="width:150px">
+          <input id="ai-architect-model" class="ai-key-input" type="text" placeholder="model (blank = same)" style="width:170px">
+          <input id="ai-architect-threshold" class="ai-key-input" type="number" min="1" max="5" step="1" placeholder="after N fails" style="width:100px">
+          <button class="ai-save-btn" onclick="saveArchitectConfigFromUI()">Save</button>
+        </div>
         <div class="ai-settings-row" id="ai-perm-row" title="Per-category permissions: allow = silent, ask = always confirm, deny = blocked outright. Sits underneath the existing critical-file/critical-command confirmations, which still apply independently.">
           <span style="font-size:11px;color:var(--t3)">Permissions:</span>
           <select id="perm-read" class="ai-key-input" style="width:90px" onchange="savePermissionsFromUI()" title="read_file, list_dir, search_codebase, grep_codebase"><option value="allow">read: allow</option><option value="ask">read: ask</option><option value="deny">read: deny</option></select>
@@ -2359,6 +2368,20 @@ async function openSkillsModal() {
   document.getElementById('skill-name-input').value = '';
   document.getElementById('skill-content-input').value = '';
   document.getElementById('skills-overlay').classList.add('show');
+  releaseEditorFocusForModal('skill-name-input');
+}
+// Monaco's keybinding service attaches its own window-level keydown capture
+// listener and can keep "logical" focus even when a modal is visually on
+// top of it — if that isn't explicitly broken, keystrokes meant for a
+// modal's text input can get swallowed by Monaco (or by xterm.js, which has
+// the same kind of aggressive internal keyboard handling) before they ever
+// reach the input, with no visible error — it just looks like typing does
+// nothing. Blur whatever currently holds focus, then force focus onto the
+// modal's own field, on a microtask delay so it wins any focus-stealing
+// that Monaco/xterm do asynchronously on their own next tick.
+function releaseEditorFocusForModal(inputId) {
+  try { document.activeElement?.blur(); } catch { /* no-op */ }
+  setTimeout(() => { document.getElementById(inputId)?.focus(); }, 0);
 }
 function closeSkillsModal() { document.getElementById('skills-overlay').classList.remove('show'); }
 
@@ -2629,6 +2652,7 @@ async function initAgentSettings() {
   await loadPersistedHistory();
   await refreshUsageDisplay();
   await refreshVerifyConfigDisplay();
+  await refreshArchitectConfigDisplay();
   await refreshPermissionsDisplay();
 }
 
@@ -2668,6 +2692,26 @@ async function saveVerifyConfigFromUI() {
   const command = document.getElementById('ai-verify-command').value.trim();
   await api.agent.setVerifyConfig({ enabled, command: command || null });
   toast(enabled ? '✅ Auto-verify enabled' : '⏸️ Auto-verify disabled');
+}
+
+async function refreshArchitectConfigDisplay() {
+  const enabledEl = document.getElementById('ai-architect-enabled');
+  if (!enabledEl) return;
+  try {
+    const cfg = await api.agent.getArchitectConfig();
+    enabledEl.checked = !!cfg.enabled;
+    document.getElementById('ai-architect-provider').value = cfg.provider || '';
+    document.getElementById('ai-architect-model').value = cfg.model || '';
+    document.getElementById('ai-architect-threshold').value = cfg.failureThreshold || 2;
+  } catch { /* no project open yet */ }
+}
+async function saveArchitectConfigFromUI() {
+  const enabled = document.getElementById('ai-architect-enabled').checked;
+  const provider = document.getElementById('ai-architect-provider').value.trim();
+  const model = document.getElementById('ai-architect-model').value.trim();
+  const failureThreshold = Number(document.getElementById('ai-architect-threshold').value) || 2;
+  await api.agent.setArchitectConfig({ enabled, provider: provider || null, model: model || null, failureThreshold });
+  toast(enabled ? '🏛️ Architect fallback enabled' : '⏸️ Architect fallback disabled');
 }
 
 // ── Cost / token budget caps ────────────────────────────────────────────────
@@ -3155,6 +3199,20 @@ let agentStopRequested = false;
 // all before recursion made it necessary to actually stop a whole tree.
 let activeTreeRequestIds = new Set();
 
+// ── Architect fallback (Aider-style) state ──────────────────────────────────
+// Tracks consecutive edit_file failures on the SAME path within one agent
+// run — reset whenever that path succeeds, a different path fails, or a new
+// user message starts a fresh run. editFailureAttempts keeps the last few
+// failed {old_str,new_str,error} triples to give the architect prompt real
+// context on what's already been tried and ruled out.
+let editFailureStreak = { path: null, count: 0 };
+let editFailureAttempts = [];
+let architectConfigCache = null; // refreshed once per runAgentLoop call, not per tool call
+async function getArchitectConfigCached() {
+  if (!architectConfigCache) { try { architectConfigCache = await api.agent.getArchitectConfig(); } catch { architectConfigCache = { enabled: false }; } }
+  return architectConfigCache;
+}
+
 function stopAgentLoop() {
   agentStopRequested = true;
   if (currentAgentRequestId) api.agent.cancelRequest(currentAgentRequestId);
@@ -3240,6 +3298,9 @@ async function sendAgentMessage() {
 async function runAgentLoop() {
   agentBusy = true;
   agentStopRequested = false;
+  architectConfigCache = null; // pick up any settings change made since the last run
+  editFailureStreak = { path: null, count: 0 };
+  editFailureAttempts = [];
   document.getElementById('ai-send-btn').style.display = 'none';
   document.getElementById('ai-stop-btn').style.display = '';
   const log = document.getElementById('ai-chat-log');
@@ -3289,8 +3350,39 @@ async function runAgentLoop() {
         if (agentStopRequested) { appendChatMsg('system', '⏹ Stopped before running remaining tool calls.'); break; }
         const card = appendToolCard(call.name, call.args, null);
         currentAgentRequestId = crypto.randomUUID();
-        const result = await execAgentTool(call.name, call.args, currentAgentRequestId);
+        let result = await execAgentTool(call.name, call.args, currentAgentRequestId);
         currentAgentRequestId = null;
+
+        // Architect fallback: edit_file failing repeatedly on the SAME file
+        // usually means the model can't reliably produce a matching old_str,
+        // not that the file changed underneath it — looping the same model
+        // through more blind retries rarely helps. If enabled and the
+        // failure streak for this exact path crosses the configured
+        // threshold, hand off to a focused, tool-call-free prompt instead.
+        if (call.name === 'edit_file' && !result.ok && result.currentContent !== undefined) {
+          const relPath = call.args?.path;
+          if (relPath && editFailureStreak.path === relPath) editFailureStreak.count++;
+          else editFailureStreak = { path: relPath, count: 1 };
+          editFailureAttempts.push({ old_str: call.args?.old_str, new_str: call.args?.new_str, error: result.error });
+
+          const archCfg = await getArchitectConfigCached();
+          if (archCfg.enabled && relPath && editFailureStreak.count >= (archCfg.failureThreshold || 2)) {
+            appendChatMsg('system', `🏛️ Architect fallback: ${editFailureStreak.count} failed edit_file attempts on ${relPath} — asking a focused pass for an exact match…`);
+            const fix = await attemptArchitectFix(relPath, editFailureAttempts.slice(-3), result.currentContent, archCfg, provider, model);
+            if (fix && fix.ok) {
+              result = fix.result;
+              appendChatMsg('system', '✅ Architect fallback produced a working edit.');
+              editFailureStreak = { path: null, count: 0 };
+              editFailureAttempts.length = 0;
+            } else if (fix) {
+              appendChatMsg('system', '⚠️ Architect fallback also failed to produce a matching edit — ' + (fix.reason || 'continuing with the original error.'));
+            }
+          }
+        } else if (call.name === 'edit_file' && result.ok) {
+          editFailureStreak = { path: null, count: 0 };
+          editFailureAttempts.length = 0;
+        }
+
         updateToolCard(card, call.name, call.args, result);
         agentHistory.push({ role:'tool', name: call.name, tool_call_id: call.id, content: JSON.stringify(result) });
         if (result.cancelled) { appendChatMsg('system', '⏹ Stopped by user.'); agentStopRequested = true; }
@@ -3337,6 +3429,69 @@ function extractToolCallFromText(text) {
     } catch { /* not valid JSON, ignore */ }
   }
   return null;
+}
+
+// ── Architect fallback: SEARCH/REPLACE block parser ─────────────────────────
+// Deliberately NOT JSON — asking a weak model to produce valid JSON with
+// correctly-escaped newlines/quotes inside a code snippet reintroduces
+// exactly the format-reliability problem this whole feature exists to work
+// around. Aider's own SEARCH/REPLACE marker format needs no escaping at all
+// (the content between markers is copied verbatim), which is precisely why
+// it's the format used here too — same reasoning, not a coincidence.
+const ARCHITECT_SEARCH_MARKER = '<<<<<<< SEARCH';
+const ARCHITECT_DIVIDER_MARKER = '=======';
+const ARCHITECT_REPLACE_MARKER = '>>>>>>> REPLACE';
+function extractSearchReplaceBlock(text) {
+  const searchIdx = text.indexOf(ARCHITECT_SEARCH_MARKER);
+  if (searchIdx === -1) return null;
+  const dividerIdx = text.indexOf(ARCHITECT_DIVIDER_MARKER, searchIdx + ARCHITECT_SEARCH_MARKER.length);
+  if (dividerIdx === -1) return null;
+  const replaceEndIdx = text.indexOf(ARCHITECT_REPLACE_MARKER, dividerIdx + ARCHITECT_DIVIDER_MARKER.length);
+  if (replaceEndIdx === -1) return null;
+  const old_str = text.slice(searchIdx + ARCHITECT_SEARCH_MARKER.length, dividerIdx).replace(/^\n/, '').replace(/\n$/, '');
+  const new_str = text.slice(dividerIdx + ARCHITECT_DIVIDER_MARKER.length, replaceEndIdx).replace(/^\n/, '').replace(/\n$/, '');
+  if (!old_str) return null; // an empty search block can never match anything real
+  return { old_str, new_str };
+}
+
+const ARCHITECT_SYSTEM_PROMPT = `You are a precise code-editing assistant. You will be given a file's current exact content and one or more failed attempts to edit it. Your ONLY job is to output exactly one SEARCH/REPLACE block identifying the correct exact text to change, in this EXACT format and nothing else — no explanation, no markdown fences, no extra text before or after:
+<<<<<<< SEARCH
+(exact text to find, copied character-for-character from the file, including whitespace)
+=======
+(the replacement text)
+>>>>>>> REPLACE
+The SEARCH section must match the given file content EXACTLY and must be unique within it — include a few extra surrounding lines if needed to make it unambiguous. Do not guess at content that isn't shown to you.`;
+
+// Runs the architect fallback: one dedicated, tool-call-free model call
+// asking for a single SEARCH/REPLACE block, then executes that as a real
+// edit_file call if one was successfully parsed. Returns:
+//   { ok: true, result }         — architect's edit succeeded, use `result` in place of the original failure
+//   { ok: false, reason }        — architect ran but didn't produce a usable/working fix
+//   null                          — architect call itself errored/aborted/hit budget (caller should just move on)
+async function attemptArchitectFix(relPath, recentAttempts, currentContent, archCfg, fallbackProvider, fallbackModel) {
+  const attemptsText = recentAttempts.map((a, i) =>
+    `Attempt ${i + 1} FAILED (${a.error || 'no match'}):\nSEARCH tried:\n${a.old_str}\nREPLACE tried:\n${a.new_str}`
+  ).join('\n\n');
+  const prompt = `File: ${relPath}\n\nCurrent exact file content:\n---\n${currentContent}\n---\n\nPrevious failed attempts to edit this file:\n${attemptsText}\n\nProduce the correct SEARCH/REPLACE block for the intended change.`;
+  let res;
+  try {
+    res = await api.ai.chatOnce({
+      provider: archCfg.provider || fallbackProvider,
+      model: archCfg.model || fallbackModel,
+      messages: [{ role: 'user', content: prompt }],
+      tools: [], systemPrompt: ARCHITECT_SYSTEM_PROMPT,
+    });
+  } catch (e) {
+    return null;
+  }
+  if (!res || res.error || res.aborted || res.budgetExceeded || !res.text) return null;
+
+  const block = extractSearchReplaceBlock(res.text);
+  if (!block) return { ok: false, reason: 'response did not contain a parseable SEARCH/REPLACE block' };
+
+  const result = await execAgentTool('edit_file', { path: relPath, old_str: block.old_str, new_str: block.new_str }, crypto.randomUUID());
+  if (result.ok) return { ok: true, result };
+  return { ok: false, reason: result.error || 'the architect\'s own edit also failed to match' };
 }
 
 const UNIVERSAL_SKILL_NAME = 'universal-coding-agent.md';

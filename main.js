@@ -779,6 +779,41 @@ ipcMain.handle('agent:setVerifyConfig', async (_, partial) => {
   return cfg;
 });
 
+// ── Architect fallback (Aider-style) ────────────────────────────────────────
+// Opt-in recovery path for weak/local models that repeatedly fail to produce
+// a matching edit_file old_str. Rather than looping the SAME model through
+// more blind retries, hand the file content + both failed attempts to a
+// focused, tool-call-free prompt (optionally on a stronger/different model)
+// whose only job is to emit one exact {old_str,new_str} pair — a narrower,
+// easier task than "use this tool correctly," the same reasoning Aider's own
+// --architect mode is built on (a planning pass + a format-specialized pass,
+// because weaker models struggle to reliably follow any single edit format).
+// Disabled by default: it costs an extra model call, so it should only run
+// for models/projects where it's actually needed.
+function architectConfigPath() { return path.join(projectRoot, '.liteide', 'agent-architect.json'); }
+function loadArchitectConfig() {
+  try { return { ...{ enabled: false, provider: null, model: null, failureThreshold: 2 }, ...JSON.parse(fs.readFileSync(architectConfigPath(), 'utf8')) }; }
+  catch { return { enabled: false, provider: null, model: null, failureThreshold: 2 }; }
+}
+function saveArchitectConfig(cfg) {
+  fs.mkdirSync(path.dirname(architectConfigPath()), { recursive: true });
+  fs.writeFileSync(architectConfigPath(), JSON.stringify(cfg, null, 2), 'utf8');
+}
+ipcMain.handle('agent:getArchitectConfig', async () => (projectRoot ? loadArchitectConfig() : { enabled: false, provider: null, model: null, failureThreshold: 2 }));
+ipcMain.handle('agent:setArchitectConfig', async (_, partial) => {
+  if (!projectRoot) throw new Error('No project folder open');
+  const cfg = loadArchitectConfig();
+  if (partial.enabled !== undefined) cfg.enabled = !!partial.enabled;
+  if (partial.provider !== undefined) cfg.provider = partial.provider || null;
+  if (partial.model !== undefined) cfg.model = partial.model || null;
+  if (partial.failureThreshold !== undefined) {
+    const n = Number(partial.failureThreshold);
+    cfg.failureThreshold = Math.max(1, Math.min(5, Number.isFinite(n) ? n : 2));
+  }
+  saveArchitectConfig(cfg);
+  return cfg;
+});
+
 // Same sandbox construction agent:runCommand uses, plus a hard timeout —
 // a hung test suite must not hang the whole agent loop indefinitely.
 async function runSandboxedWithTimeout(cmd, timeoutMs) {
@@ -1074,9 +1109,9 @@ function requestApproval(action, detail) {
 
 // ── Universal Coding Agent skill — seeded into every project, provider-agnostic ──
 const UNIVERSAL_SKILL_NAME = 'universal-coding-agent.md';
-const UNIVERSAL_SKILL_VERSION = '1.8.0';
-const UNIVERSAL_SKILL_CONTENT = `<!-- LiteIDE Universal Coding Agent Skill — v1.8.0 -->
-# Universal Coding Agent Skill — v1.8.0
+const UNIVERSAL_SKILL_VERSION = '1.9.0';
+const UNIVERSAL_SKILL_CONTENT = `<!-- LiteIDE Universal Coding Agent Skill — v1.9.0 -->
+# Universal Coding Agent Skill — v1.9.0
 
 Provider-agnostic core discipline. Applies identically whether you are Claude, GPT, Gemini, or a local Ollama model — this is plain instruction text, not a provider-specific feature. Every directive below is a hard rule, not a suggestion, unless marked "prefer."
 
@@ -1206,6 +1241,11 @@ Provider-agnostic core discipline. Applies identically whether you are Claude, G
 - There is also a hard cap of 12 total sub-agents across the WHOLE tree, shared across every \`spawn_subagents\` call anywhere in it regardless of depth — not 12 per call. Once exhausted, further spawn attempts are refused with a clear error. If you hit this, do the remaining work directly instead of trying to spawn more.
 - Only delegate genuinely independent, parallelizable sub-tasks. Recursion is for when a sub-task turns out to have independent pieces of its own worth splitting further — it is not a substitute for just doing sequential work yourself.
 - Stopping the agent (the Stop button) now cancels an entire in-flight sub-agent tree, not just the top-level call — this was fixed as a prerequisite for allowing recursion at all.
+
+## 21. Architect fallback for edit_file (v1.9.0)
+- If \`edit_file\` fails on the SAME path several times in a row (default: 2, user-configurable in Agent Settings), and the user has enabled "Architect fallback" in Agent Settings, a separate focused pass automatically takes over — you'll see a system message about it. You don't need to do anything differently; just keep trying edit_file normally. If the fallback succeeds, its result appears in your tool history as if it were your own successful edit_file call.
+- This is opt-in and disabled by default — it costs an extra model call, so it's meant for cases where the same edit keeps failing to match, not as a first resort.
+- If it's enabled and you notice repeated edit_file failures on one file are NOT triggering a fallback message, the feature is simply off for this project (or the failure count hasn't reached the configured threshold yet) — that's not a bug, just check Agent Settings.
 `;
 
 // Seeds the skill on first project open. On later opens, if the on-disk file
