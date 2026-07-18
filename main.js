@@ -925,7 +925,7 @@ function resolveInProject(relPath) {
 // A coarser, user-controlled layer UNDER the existing critical-file/
 // critical-command pattern gates above — both must pass, this doesn't
 // replace them. Categories map to natural tool groupings:
-//   read       — read_file, list_dir, search_codebase (ragSearch), grep_codebase
+//   read       — read_file, list_dir, search_codebase (ragSearch), grep_codebase, get_repo_map
 //   write      — write_file, edit_file (critical-file patterns still apply independently)
 //   delete     — delete_file
 //   execute    — run_command (critical-command patterns still apply independently)
@@ -1109,9 +1109,9 @@ function requestApproval(action, detail) {
 
 // ── Universal Coding Agent skill — seeded into every project, provider-agnostic ──
 const UNIVERSAL_SKILL_NAME = 'universal-coding-agent.md';
-const UNIVERSAL_SKILL_VERSION = '1.9.0';
-const UNIVERSAL_SKILL_CONTENT = `<!-- LiteIDE Universal Coding Agent Skill — v1.9.0 -->
-# Universal Coding Agent Skill — v1.9.0
+const UNIVERSAL_SKILL_VERSION = '1.10.0';
+const UNIVERSAL_SKILL_CONTENT = `<!-- LiteIDE Universal Coding Agent Skill — v1.10.0 -->
+# Universal Coding Agent Skill — v1.10.0
 
 Provider-agnostic core discipline. Applies identically whether you are Claude, GPT, Gemini, or a local Ollama model — this is plain instruction text, not a provider-specific feature. Every directive below is a hard rule, not a suggestion, unless marked "prefer."
 
@@ -1246,6 +1246,12 @@ Provider-agnostic core discipline. Applies identically whether you are Claude, G
 - If \`edit_file\` fails on the SAME path several times in a row (default: 2, user-configurable in Agent Settings), and the user has enabled "Architect fallback" in Agent Settings, a separate focused pass automatically takes over — you'll see a system message about it. You don't need to do anything differently; just keep trying edit_file normally. If the fallback succeeds, its result appears in your tool history as if it were your own successful edit_file call.
 - This is opt-in and disabled by default — it costs an extra model call, so it's meant for cases where the same edit keeps failing to match, not as a first resort.
 - If it's enabled and you notice repeated edit_file failures on one file are NOT triggering a fallback message, the feature is simply off for this project (or the failure count hasn't reached the configured threshold yet) — that's not a bug, just check Agent Settings.
+
+## 22. Codebase orientation — \`get_repo_map\` (v1.10.0)
+- When you're working in a codebase you haven't explored yet (a fresh session, or a large project you haven't touched much), call \`get_repo_map\` FIRST, before reaching for \`read_file\`/\`search_codebase\` repeatedly to figure out "what's even here." It returns every recognized file's top-level functions/classes/types as single-line signatures — a structural overview for a small fraction of the context cost of reading files directly.
+- It is pattern-based, not a real parser (JS/TS, Python, Go, Rust, Java/Kotlin, C/C++, Ruby, PHP are covered). It can miss multi-line signatures or unusual formatting, and only files with at least one recognized symbol are included — treat it as a map for orientation, not ground truth. Confirm anything specific with \`read_file\` or \`grep_codebase\` before relying on it.
+- Pass \`focus_path\` (a path relative to the project root) to bias the map toward files near a specific area you're about to work in, when the whole-project view would be too broad.
+- On a large project, the map itself is pruned to the most relevant files (check \`outputTruncated\`) — narrow with \`focus_path\`, or fall back to \`grep_codebase\`/\`search_codebase\` for anything not shown.
 `;
 
 // Seeds the skill on first project open. On later opens, if the on-disk file
@@ -1741,6 +1747,164 @@ ipcMain.handle('agent:grepCodebase', async (_, pattern, opts = {}) => {
     if (r.ok || r.error?.includes('escapes project folder')) return r; // real rg error (not "rg missing") — surface it, don't silently mask with a slower fallback
   }
   return grepViaFallback(pattern, normalizedOpts);
+});
+
+// ── get_repo_map: Aider-style condensed codebase overview ──────────────────
+// Companion to search_codebase (RAG) and grep_codebase (exact match) — both
+// answer "where is X." This answers a different, earlier question: "what
+// does this codebase even look like, structurally, before I've asked
+// anything specific." Reading full file contents to answer that burns huge
+// context on a large project; a repo map instead lists every file's
+// top-level symbols (functions/classes/etc.) as single-line signatures, so
+// the agent can orient itself for a small fraction of the cost.
+//
+// Design choice (explicit, not a default): regex-based per-language symbol
+// extraction, not tree-sitter. Tree-sitter would produce genuinely more
+// accurate results (real AST, not line-pattern guessing), but adds a real
+// native dependency with per-platform prebuilt binaries and per-language
+// grammar packages — exactly the category of install friction that already
+// caused real pain with node-pty on Windows (see README/HANDOFF history).
+// This project's established pattern (grep_codebase: ripgrep-if-available,
+// pure-JS fallback otherwise) favors zero-dependency correctness-by-default
+// over stronger-but-fragile tooling. Regex extraction is weaker — it can
+// miss multi-line signatures, misfire on unusual formatting, and has no real
+// understanding of scope — but it always works, on every platform, with no
+// install step, which matters more for a repo-orientation tool that should
+// just work out of the box.
+const REPOMAP_EXT_FAMILY = {
+  '.js':'js', '.jsx':'js', '.mjs':'js', '.cjs':'js', '.ts':'js', '.tsx':'js',
+  '.py':'python', '.pyw':'python',
+  '.go':'go',
+  '.rs':'rust',
+  '.java':'java', '.kt':'java', '.kts':'java',
+  '.c':'c', '.h':'c', '.cpp':'c', '.hpp':'c', '.cc':'c', '.cxx':'c',
+  '.rb':'ruby',
+  '.php':'php',
+};
+// Each pattern's capture group 1 is the symbol name; `kind` is just a label
+// for readability in the output, not used for filtering.
+const REPOMAP_PATTERNS = {
+  js: [
+    { re: /^\s*export\s+default\s+(?:async\s+)?function\s*\*?\s*(\w+)?\s*\(/, kind: 'function' },
+    { re: /^\s*(?:export\s+)?(?:async\s+)?function\s*\*?\s+(\w+)\s*\(/, kind: 'function' },
+    { re: /^\s*export\s+default\s+class\s+(\w+)/, kind: 'class' },
+    { re: /^\s*(?:export\s+)?class\s+(\w+)/, kind: 'class' },
+    { re: /^\s*export\s+(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s*)?\(/, kind: 'export' },
+    { re: /^\s*(?:export\s+)?interface\s+(\w+)/, kind: 'interface' },
+    { re: /^\s*(?:export\s+)?type\s+(\w+)\s*=/, kind: 'type' },
+  ],
+  python: [
+    { re: /^\s*(?:async\s+)?def\s+(\w+)\s*\(/, kind: 'def' },
+    { re: /^\s*class\s+(\w+)/, kind: 'class' },
+  ],
+  go: [
+    { re: /^func\s+(?:\([^)]*\)\s*)?(\w+)\s*\(/, kind: 'func' },
+    { re: /^type\s+(\w+)\s+(?:struct|interface)/, kind: 'type' },
+  ],
+  rust: [
+    { re: /^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+(\w+)/, kind: 'fn' },
+    { re: /^\s*(?:pub(?:\([^)]*\))?\s+)?struct\s+(\w+)/, kind: 'struct' },
+    { re: /^\s*(?:pub(?:\([^)]*\))?\s+)?enum\s+(\w+)/, kind: 'enum' },
+    { re: /^\s*(?:pub(?:\([^)]*\))?\s+)?trait\s+(\w+)/, kind: 'trait' },
+    { re: /^\s*impl(?:<[^>]*>)?\s+(?:\w+\s+for\s+)?(\w+)/, kind: 'impl' },
+  ],
+  java: [
+    { re: /^\s*(?:public|private|protected)?\s*(?:static\s+)?(?:final\s+)?(?:abstract\s+)?class\s+(\w+)/, kind: 'class' },
+    { re: /^\s*(?:public|private|protected)?\s*interface\s+(\w+)/, kind: 'interface' },
+    { re: /^\s*fun\s+(\w+)\s*\(/, kind: 'fun' }, // Kotlin
+  ],
+  c: [
+    { re: /^\s*(?:typedef\s+)?struct\s+(\w+)/, kind: 'struct' },
+    { re: /^\s*class\s+(\w+)/, kind: 'class' },
+    // Best-effort C/C++ function definition: "type name(args) {" on one line.
+    // Deliberately conservative (requires the opening brace on the same
+    // line) to avoid false-positives on control-flow statements like
+    // `if (...) {` — those never have a preceding return-type token.
+    { re: /^[A-Za-z_][\w:<>,\s\*&]*[\s\*&](\w+)\s*\([^;{]*\)\s*\{?\s*$/, kind: 'function', exclude: /^(if|for|while|switch|catch|return|else)$/ },
+  ],
+  ruby: [
+    { re: /^\s*def\s+(?:self\.)?(\w+[?!=]?)/, kind: 'def' },
+    { re: /^\s*class\s+(\w+)/, kind: 'class' },
+    { re: /^\s*module\s+(\w+)/, kind: 'module' },
+  ],
+  php: [
+    { re: /^\s*(?:public|private|protected)?\s*(?:static\s+)?function\s+(\w+)\s*\(/, kind: 'function' },
+    { re: /^\s*class\s+(\w+)/, kind: 'class' },
+  ],
+};
+const REPOMAP_MAX_SYMBOLS_PER_FILE = 40;
+const REPOMAP_MAX_FILES_SCANNED = 2000; // same fairness cap as search_codebase
+const REPOMAP_MAX_OUTPUT_FILES = 300;   // how many files' symbol lists actually make it into the response
+const REPOMAP_MAX_LINE_LEN = 160;
+
+function extractFileSymbols(content, family) {
+  const patterns = REPOMAP_PATTERNS[family];
+  if (!patterns) return [];
+  const lines = content.split('\n');
+  const symbols = [];
+  for (let i = 0; i < lines.length && symbols.length < REPOMAP_MAX_SYMBOLS_PER_FILE; i++) {
+    const line = lines[i];
+    for (const { re, kind, exclude } of patterns) {
+      const m = line.match(re);
+      if (m && m[1] && !(exclude && exclude.test(m[1]))) {
+        symbols.push({ line: i + 1, kind, sig: line.trim().slice(0, REPOMAP_MAX_LINE_LEN) });
+        break; // one match per line is enough — avoids double-counting an export+function combo line
+      }
+    }
+  }
+  return symbols;
+}
+
+ipcMain.handle('agent:getRepoMap', async (_, opts = {}) => {
+  if (!projectRoot) return { ok: false, error: 'No project folder open' };
+  const perm = checkCategoryPermission('read');
+  if (perm === 'deny') return { ok: false, error: 'Blocked by permission settings (read is set to deny)' };
+  if (perm === 'ask') { const approved = await requestApproval('read_file', { path: 'repo map' }); if (!approved) return { ok: false, error: 'Denied by user' }; }
+
+  const focusPath = opts.focus_path ? String(opts.focus_path).replace(/\\/g, '/') : null;
+  const allFiles = searchCollectFiles(projectRoot);
+  const scanCapped = allFiles.length > REPOMAP_MAX_FILES_SCANNED;
+  const scanFiles = allFiles.slice(0, REPOMAP_MAX_FILES_SCANNED);
+
+  const candidates = [];
+  for (const file of scanFiles) {
+    const ext = path.extname(file).toLowerCase();
+    const family = REPOMAP_EXT_FAMILY[ext];
+    if (!family) continue;
+    let stat;
+    try { stat = fs.statSync(file); } catch { continue; }
+    if (stat.size > SEARCH_MAX_FILE_BYTES) continue;
+    let content;
+    try { content = fs.readFileSync(file, 'utf8'); } catch { continue; }
+    if (content.includes('\u0000')) continue; // looks binary
+    const symbols = extractFileSymbols(content, family);
+    if (!symbols.length) continue; // a file with no recognized top-level symbols isn't useful in a symbol map
+    const relPath = path.relative(projectRoot, file).replace(/\\/g, '/');
+    candidates.push({ path: relPath, symbols });
+  }
+
+  // Rank: files near focusPath first (if given), then by symbol count
+  // (more structure ≈ more central to the codebase), then alphabetically
+  // for determinism.
+  candidates.sort((a, b) => {
+    if (focusPath) {
+      const aNear = a.path.startsWith(path.dirname(focusPath)) ? 1 : 0;
+      const bNear = b.path.startsWith(path.dirname(focusPath)) ? 1 : 0;
+      if (aNear !== bNear) return bNear - aNear;
+    }
+    if (b.symbols.length !== a.symbols.length) return b.symbols.length - a.symbols.length;
+    return a.path.localeCompare(b.path);
+  });
+
+  const outputTruncated = candidates.length > REPOMAP_MAX_OUTPUT_FILES;
+  const files = candidates.slice(0, REPOMAP_MAX_OUTPUT_FILES);
+
+  return {
+    ok: true, files,
+    filesWithSymbols: candidates.length, filesScanned: scanFiles.length, totalFilesInProject: allFiles.length,
+    ...(scanCapped ? { scanCapped: true } : {}),
+    ...(outputTruncated ? { outputTruncated: true, warning: `${candidates.length} files had recognizable symbols but only the top ${REPOMAP_MAX_OUTPUT_FILES} (by relevance) are included — narrow with focus_path or use grep_codebase/search_codebase for anything not shown.` } : {}),
+  };
 });
 
 // ── web_search / web_fetch ───────────────────────────────────────────────────

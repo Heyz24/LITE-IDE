@@ -72,6 +72,7 @@ contextBridge.exposeInMainWorld('api', {
     getSandboxStatus: ()            => ipcRenderer.invoke('agent:getSandboxStatus'),
     ragSearch:      (q, topK)       => ipcRenderer.invoke('agent:ragSearch', q, topK),
     grepCodebase:   (pattern, opts) => ipcRenderer.invoke('agent:grepCodebase', pattern, opts),
+    getRepoMap:     (opts)          => ipcRenderer.invoke('agent:getRepoMap', opts),
     webSearch:      query           => ipcRenderer.invoke('agent:webSearch', query),
     webFetch:       url             => ipcRenderer.invoke('agent:webFetch', url),
     listSkills:     ()              => ipcRenderer.invoke('agent:listSkills'),

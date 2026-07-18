@@ -1049,7 +1049,7 @@ html, body {
         </div>
         <div class="ai-settings-row" id="ai-perm-row" title="Per-category permissions: allow = silent, ask = always confirm, deny = blocked outright. Sits underneath the existing critical-file/critical-command confirmations, which still apply independently.">
           <span style="font-size:11px;color:var(--t3)">Permissions:</span>
-          <select id="perm-read" class="ai-key-input" style="width:90px" onchange="savePermissionsFromUI()" title="read_file, list_dir, search_codebase, grep_codebase"><option value="allow">read: allow</option><option value="ask">read: ask</option><option value="deny">read: deny</option></select>
+          <select id="perm-read" class="ai-key-input" style="width:90px" onchange="savePermissionsFromUI()" title="read_file, list_dir, search_codebase, grep_codebase, get_repo_map"><option value="allow">read: allow</option><option value="ask">read: ask</option><option value="deny">read: deny</option></select>
           <select id="perm-write" class="ai-key-input" style="width:95px" onchange="savePermissionsFromUI()" title="write_file, edit_file"><option value="allow">write: allow</option><option value="ask">write: ask</option><option value="deny">write: deny</option></select>
           <select id="perm-delete" class="ai-key-input" style="width:100px" onchange="savePermissionsFromUI()" title="delete_file — allow still confirms, only deny is silent-free"><option value="allow">delete: allow</option><option value="ask">delete: ask</option><option value="deny">delete: deny</option></select>
           <select id="perm-execute" class="ai-key-input" style="width:105px" onchange="savePermissionsFromUI()" title="run_command"><option value="allow">execute: allow</option><option value="ask">execute: ask</option><option value="deny">execute: deny</option></select>
@@ -2865,6 +2865,8 @@ const AGENT_TOOLS = [
     parameters: { type:'object', properties:{ query:{type:'string'} }, required:['query'] } },
   { name: 'grep_codebase', description: 'Exact-match (or regex) line-level search across the project — the companion to search_codebase. Use this instead of search_codebase when you need every occurrence of a specific symbol, string, import, or exact phrase (e.g. "every call site of parseConfig", "every file importing lodash") — RAG scoring can bury or miss a rare exact match, this tool cannot. Backed by ripgrep when installed (fast, .gitignore-aware), falls back to a slower pure-JS scan otherwise — check the `engine` field on the result if you need to know which ran. Defaults to a literal/fixed-string match (set fixed_strings:false for a real regex pattern). Results are capped at 300 matches (check `truncated`); narrow the pattern or use `path` to scope to a subdirectory if you hit the cap.',
     parameters: { type:'object', properties:{ pattern:{type:'string'}, path:{type:'string', description:'Optional subdirectory (relative to project root) to scope the search to.'}, fixed_strings:{type:'boolean', description:'Default true — treat pattern as a literal string, not regex. Set false to use pattern as a regex.'}, case_sensitive:{type:'boolean', description:'Default false (case-insensitive).'} }, required:['pattern'] } },
+  { name: 'get_repo_map', description: 'Get a condensed, symbol-level overview of the codebase — every recognized file\'s top-level functions/classes/types as single-line signatures, WITHOUT reading full file contents. Use this early when working in an unfamiliar or large codebase, before reaching for read_file/search_codebase repeatedly, to understand overall structure cheaply. Covers JS/TS, Python, Go, Rust, Java/Kotlin, C/C++, Ruby, and PHP via lightweight pattern matching (not a real parser — it can miss multi-line signatures or unusual formatting; treat it as a map for orientation, not a source of truth, and read_file/grep_codebase to confirm anything specific). Only files with at least one recognized symbol are included. Large projects are pruned to the most relevant/central files (check `outputTruncated`); pass focus_path to bias toward files near a specific path.',
+    parameters: { type:'object', properties:{ focus_path:{type:'string', description:'Optional path (relative to project root) to rank nearby files higher in the map.'} } } },
   { name: 'web_search', description: 'Search the web for current information — documentation, error messages, package/API references, current best practices. Use when the answer depends on something outside this codebase or your training data (e.g. a library\'s current API, a specific error message, current versions).',
     parameters: { type:'object', properties:{ query:{type:'string'} }, required:['query'] } },
   { name: 'web_fetch', description: 'Fetch the content of a specific URL (e.g. one found via web_search, or a docs page the user gave you). Returns readable text extracted from the page.',
@@ -2923,6 +2925,7 @@ async function execAgentTool(name, args, requestId) {
     }
     case 'search_codebase': return await api.agent.ragSearch(args.query, 8);
     case 'grep_codebase': return await api.agent.grepCodebase(args.pattern, { path: args.path, fixed_strings: args.fixed_strings, case_sensitive: args.case_sensitive });
+    case 'get_repo_map': return await api.agent.getRepoMap({ focus_path: args.focus_path });
     case 'web_search': return await api.agent.webSearch(args.query);
     case 'web_fetch':  return await api.agent.webFetch(args.url);
     case 'spawn_subagents': {
@@ -3139,7 +3142,7 @@ function updateToolCard(el, name, args, result) {
   const pending = result === null || result === undefined;
   const denied = !pending && result.ok === false && /denied/i.test(result.error || '');
   el.className = 'ai-tool-card' + (denied ? ' denied' : pending ? ' pending' : '');
-  const icon = denied ? '🚫' : pending ? '⏳' : { read_file:'📖', list_dir:'📁', write_file:'✏️', edit_file:'🩹', delete_file:'🗑️', run_command:'⚡', run_in_terminal:'🖥️', search_codebase:'🔎', grep_codebase:'🎯', spawn_subagents:'🧬' }[name] || '🔧';
+  const icon = denied ? '🚫' : pending ? '⏳' : { read_file:'📖', list_dir:'📁', write_file:'✏️', edit_file:'🩹', delete_file:'🗑️', run_command:'⚡', run_in_terminal:'🖥️', search_codebase:'🔎', grep_codebase:'🎯', get_repo_map:'🗺️', spawn_subagents:'🧬' }[name] || '🔧';
   const filePath = args?.path || '';
   el.querySelector('.th').textContent = `${icon} ${name}${filePath ? ' — ' + filePath : ''}${pending ? ' (waiting for approval…)' : ''}`;
   el.querySelector('.args').textContent = (name === 'edit_file' || name === 'write_file') ? '' : Object.entries(args || {}).map(([k,v]) => `${k}=${typeof v==='string' && v.length>60 ? v.slice(0,60)+'…' : v}`).join(', ');
@@ -3169,6 +3172,7 @@ function updateToolCard(el, name, args, result) {
       : name === 'run_command' ? (`[sandbox: ${result.sandboxType || 'unknown'}] ` + ((result.stdout || '') + (result.stderr || '')).slice(-500))
       : name === 'search_codebase' ? (result.results || []).map(r => `${r.file}:${r.start}`).join('\n')
       : name === 'grep_codebase' ? (`[${result.engine || 'unknown'}] ${(result.results||[]).length} match(es)${result.truncated ? ' (truncated)' : ''}\n` + (result.results || []).map(r => `${r.file}:${r.line}: ${r.text}`).join('\n'))
+      : name === 'get_repo_map' ? (`${(result.files||[]).length} file(s) with symbols${result.outputTruncated ? ' (truncated)' : ''}\n` + (result.files || []).map(f => `${f.path}\n` + f.symbols.map(s => `  ${s.line}: ${s.sig}`).join('\n')).join('\n'))
       : (name === 'edit_file' || name === 'write_file') ? (result.ok ? '✓ applied' + (result.critical ? ' (approved)' : '') + formatVerificationSummary(result.verification) : '')
       : JSON.stringify(result).slice(0, 500);
     if (summary) { pre.textContent = summary; el.appendChild(pre); }
