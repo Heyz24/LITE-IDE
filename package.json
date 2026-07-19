@@ -1,6 +1,6 @@
 {
   "name": "lite-ide",
-  "version": "1.10.0",
+  "version": "2.1.0",
   "description": "Lightweight IDE with Liquid Glass UI",
   "author": "Harshal",
   "main": "main.js",
@@ -10,7 +10,7 @@
     "dev": "electron . --dev",
     "dist": "node build.js",
     "postinstall": "electron-builder install-app-deps",
-    "test": "node --test test/wiring.test.js test/backend.test.js test/ai-providers.test.js test/sandbox.test.js test/cancellation.test.js test/budget.test.js test/compaction.test.js test/verification.test.js test/web-tools.test.js test/permissions.test.js test/escalation.test.js test/terminal.test.js test/grep.test.js test/subagents.test.js test/architect.test.js test/architect-logic.test.js test/ui-focus.test.js test/repomap.test.js"
+    "test": "node --test test/wiring.test.js test/backend.test.js test/ai-providers.test.js test/sandbox.test.js test/cancellation.test.js test/budget.test.js test/compaction.test.js test/verification.test.js test/web-tools.test.js test/permissions.test.js test/escalation.test.js test/terminal.test.js test/grep.test.js test/subagents.test.js test/architect.test.js test/architect-logic.test.js test/ui-focus.test.js test/repomap.test.js test/mcp.test.js"
   },
 
   "build": {

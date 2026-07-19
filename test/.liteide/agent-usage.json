@@ -2,14 +2,14 @@
   "totalInputTokens": 0,
   "totalOutputTokens": 0,
   "totalCostUsd": 0,
-  "callCount": 21,
+  "callCount": 7,
   "cap": {
     "maxTokens": null,
     "maxUsd": null
   },
   "log": [
     {
-      "ts": 1784279889159,
+      "ts": 1784452385023,
       "provider": "openai",
       "model": "gpt-5.1",
       "inputTokens": 0,
@@ -17,7 +17,7 @@
       "costUsd": 0
     },
     {
-      "ts": 1784279889178,
+      "ts": 1784452385051,
       "provider": "ollama",
       "model": "qwen2.5-coder",
       "inputTokens": 0,
@@ -25,7 +25,7 @@
       "costUsd": 0
     },
     {
-      "ts": 1784279889207,
+      "ts": 1784452385072,
       "provider": "anthropic",
       "model": "claude-sonnet-4-6",
       "inputTokens": 0,
@@ -33,7 +33,7 @@
       "costUsd": 0
     },
     {
-      "ts": 1784279889235,
+      "ts": 1784452385093,
       "provider": "anthropic",
       "model": "claude-sonnet-4-6",
       "inputTokens": 0,
@@ -41,7 +41,7 @@
       "costUsd": 0
     },
     {
-      "ts": 1784279889256,
+      "ts": 1784452385115,
       "provider": "gemini",
       "model": "gemini-2.5-flash",
       "inputTokens": 0,
@@ -49,7 +49,7 @@
       "costUsd": 0
     },
     {
-      "ts": 1784279889264,
+      "ts": 1784452385128,
       "provider": "gemini",
       "model": "gemini-2.5-flash",
       "inputTokens": 0,
@@ -57,119 +57,7 @@
       "costUsd": 0
     },
     {
-      "ts": 1784279889282,
-      "provider": "openai",
-      "model": "gpt-5.1",
-      "inputTokens": 0,
-      "outputTokens": 0,
-      "costUsd": 0
-    },
-    {
-      "ts": 1784346468207,
-      "provider": "openai",
-      "model": "gpt-5.1",
-      "inputTokens": 0,
-      "outputTokens": 0,
-      "costUsd": 0
-    },
-    {
-      "ts": 1784346468228,
-      "provider": "ollama",
-      "model": "qwen2.5-coder",
-      "inputTokens": 0,
-      "outputTokens": 0,
-      "costUsd": 0
-    },
-    {
-      "ts": 1784346468245,
-      "provider": "anthropic",
-      "model": "claude-sonnet-4-6",
-      "inputTokens": 0,
-      "outputTokens": 0,
-      "costUsd": 0
-    },
-    {
-      "ts": 1784346468261,
-      "provider": "anthropic",
-      "model": "claude-sonnet-4-6",
-      "inputTokens": 0,
-      "outputTokens": 0,
-      "costUsd": 0
-    },
-    {
-      "ts": 1784346468279,
-      "provider": "gemini",
-      "model": "gemini-2.5-flash",
-      "inputTokens": 0,
-      "outputTokens": 0,
-      "costUsd": 0
-    },
-    {
-      "ts": 1784346468287,
-      "provider": "gemini",
-      "model": "gemini-2.5-flash",
-      "inputTokens": 0,
-      "outputTokens": 0,
-      "costUsd": 0
-    },
-    {
-      "ts": 1784346468301,
-      "provider": "openai",
-      "model": "gpt-5.1",
-      "inputTokens": 0,
-      "outputTokens": 0,
-      "costUsd": 0
-    },
-    {
-      "ts": 1784367919323,
-      "provider": "openai",
-      "model": "gpt-5.1",
-      "inputTokens": 0,
-      "outputTokens": 0,
-      "costUsd": 0
-    },
-    {
-      "ts": 1784367919343,
-      "provider": "ollama",
-      "model": "qwen2.5-coder",
-      "inputTokens": 0,
-      "outputTokens": 0,
-      "costUsd": 0
-    },
-    {
-      "ts": 1784367919362,
-      "provider": "anthropic",
-      "model": "claude-sonnet-4-6",
-      "inputTokens": 0,
-      "outputTokens": 0,
-      "costUsd": 0
-    },
-    {
-      "ts": 1784367919378,
-      "provider": "anthropic",
-      "model": "claude-sonnet-4-6",
-      "inputTokens": 0,
-      "outputTokens": 0,
-      "costUsd": 0
-    },
-    {
-      "ts": 1784367919396,
-      "provider": "gemini",
-      "model": "gemini-2.5-flash",
-      "inputTokens": 0,
-      "outputTokens": 0,
-      "costUsd": 0
-    },
-    {
-      "ts": 1784367919405,
-      "provider": "gemini",
-      "model": "gemini-2.5-flash",
-      "inputTokens": 0,
-      "outputTokens": 0,
-      "costUsd": 0
-    },
-    {
-      "ts": 1784367919419,
+      "ts": 1784452385142,
       "provider": "openai",
       "model": "gpt-5.1",
       "inputTokens": 0,

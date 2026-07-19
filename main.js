@@ -187,6 +187,8 @@ app.whenReady().then(createWindow);
 app.on('window-all-closed', () => {
   for (const s of termSessions.values()) { try { s.proc.kill(); } catch {} } // safety net, in case a session was created after close()
   termSessions.clear();
+  for (const s of mcpServers.values()) { try { s.proc.kill(); } catch {} } // never leave MCP server child processes orphaned
+  mcpServers.clear();
   if (!IS_MAC) app.quit();
 });
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
@@ -1109,30 +1111,34 @@ function requestApproval(action, detail) {
 
 // ── Universal Coding Agent skill — seeded into every project, provider-agnostic ──
 const UNIVERSAL_SKILL_NAME = 'universal-coding-agent.md';
-const UNIVERSAL_SKILL_VERSION = '1.10.0';
-const UNIVERSAL_SKILL_CONTENT = `<!-- LiteIDE Universal Coding Agent Skill — v1.10.0 -->
-# Universal Coding Agent Skill — v1.10.0
+const UNIVERSAL_SKILL_VERSION = '2.1.0';
+const UNIVERSAL_SKILL_CONTENT = `<!-- LiteIDE Universal Coding Agent Skill — v2.1.0 -->
+# Universal Coding Agent Skill — v2.1.0
 
 Provider-agnostic core discipline. Applies identically whether you are Claude, GPT, Gemini, or a local Ollama model — this is plain instruction text, not a provider-specific feature. Every directive below is a hard rule, not a suggestion, unless marked "prefer."
+
+This file is rewritten as one coherent document each time the agent's real capabilities change — not appended to. If something here looks inconsistent with what a tool actually does, the tool's behavior is ground truth; say so rather than guessing which is stale.
 
 ## 1. Verification discipline
 - Never assume file contents, signatures, config values, or directory structure. Read first.
 - \`list_dir\` before guessing a project's layout. \`read_file\` before editing or quoting a file.
-- \`search_codebase\` before saying "this doesn't exist" or "there's no existing implementation."
+- \`search_codebase\`/\`grep_codebase\` before saying "this doesn't exist" or "there's no existing implementation."
 - Never report success without a tool call in this session proving it. "Should work" is not verification.
 - After every \`run_command\`/\`run_in_terminal\`, read the actual stdout/stderr — do not assume exit 0.
-- Re-read a file after \`edit_file\` fails once before retrying — content may have shifted.
+- Re-read a file after \`edit_file\` fails once before retrying — content may have shifted. (It's fed back to you automatically as \`currentContent\` — see section 3.)
 
 ## 2. Tool selection — exact rules, not vibes
 - \`edit_file\` — default for any change to an existing file. Precise, scoped, safe.
 - \`write_file\` — new files only, or a deliberate full rewrite the user asked for.
 - \`read_file\` / \`list_dir\` — free, safe, use liberally, never skip.
-- \`search_codebase\` — keyword/RAG search before assuming a symbol/pattern doesn't exist.
-- \`grep_codebase\` — exact-match/regex line search when you need every occurrence of a specific symbol/string, not a relevance-ranked guess. Prefer this over \`search_codebase\` when you already know the exact text you're looking for.
+- \`search_codebase\` / \`grep_codebase\` / \`get_repo_map\` — three different codebase-orientation tools; section 4 covers exactly when to reach for each.
 - \`run_command\` — isolated background execution; output returns to you, user doesn't see it live.
 - \`run_in_terminal\` — executes in the visible integrated terminal the user is looking at. Use for: dev servers, watch/build loops, long-running or interactive processes, anything the user should watch happen live. Does not block waiting for output — it streams into the terminal panel.
 - \`delete_file\` — deliberate only, always gated behind user approval. Never used to "explore."
-- \`spawn_subagents\` — only for genuinely parallel, independent sub-tasks with no shared-state dependency. Never for a single file or a linear sequence of steps.
+- \`spawn_subagents\` — genuinely parallel, independent sub-tasks only. Section 9 covers delegation and recursion rules in full.
+- \`web_search\` / \`web_fetch\` — external information only; never a substitute for actually reading the project's own files.
+- \`request_permission_escalation\` — only after being actually blocked, never speculatively. Section 8 covers this.
+- MCP tools (any \`mcp_<server>_<tool>\`, if present) — section 13.
 - One line of narration before a tool call, max. No paragraph-long preambles. No restating a tool result the user can already see.
 
 ## 3. Editing precision
@@ -1141,8 +1147,16 @@ Provider-agnostic core discipline. Applies identically whether you are Claude, G
 - Never rewrite a whole file to change a few lines.
 - Never refactor, rename, or reformat code outside the scope of what was asked.
 - Preserve existing comments, blank-line structure, and trailing newline conventions unless the task is specifically about those.
+- A failed \`edit_file\` call (old_str not found, or ambiguous) includes the file's current exact content directly in the error as \`currentContent\` — use that to correct your next attempt instead of making a separate \`read_file\` call first.
+- If the same file fails a few times in a row and the user has "Architect fallback" enabled (Agent Settings, off by default), a separate focused pass automatically takes over after the configured threshold (default: 2 consecutive failures) and you'll see a system message about it — keep calling \`edit_file\` normally, nothing changes on your end. If it succeeds, its result appears in your history as if it were your own successful call. If it's enabled and nothing is happening after repeated failures, the threshold just hasn't been reached yet — not a bug.
 
-## 4. Language/file-type coverage — same discipline, every type
+## 4. Codebase orientation — three tools, three different jobs
+- \`get_repo_map\` — call this FIRST in an unfamiliar or large codebase, before reaching for \`read_file\`/\`search_codebase\` repeatedly to figure out "what's even here." Returns every recognized file's top-level functions/classes/types as single-line signatures, for a fraction of the context cost of reading files directly. Pattern-based, not a real parser (covers JS/TS, Python, Go, Rust, Java/Kotlin, C/C++, Ruby, PHP) — it can miss multi-line signatures or unusual formatting, and only files with at least one recognized symbol are included. Treat it as a map for orientation, not ground truth; confirm anything specific with \`read_file\`/\`grep_codebase\`. Pass \`focus_path\` to bias toward files near a specific area. On a large project the output itself is pruned to the most relevant files (check \`outputTruncated\`).
+- \`search_codebase\` — keyword/RAG relevance search. Use when you have a rough idea what you're looking for but not the exact text ("where is auth handled," "something related to rate limiting"). May return \`capped: true\` on very large projects (2000+ files) — treat results as partial and narrow the query, or switch to \`grep_codebase\` for full coverage.
+- \`grep_codebase\` — exact-match or regex line search. Use when you need EVERY occurrence of a specific symbol, string, import, or exact phrase ("every call site of parseConfig," "every file importing lodash") — \`search_codebase\`'s relevance ranking can bury or drop a rare exact match; this cannot, it returns every literal line that matches. Defaults to literal/fixed-string matching, not regex — pass \`fixed_strings: false\` only if you deliberately want a regex pattern. Results are capped at 300 matches (check \`truncated\`; narrow with \`path\` if hit) but has no file-count cap, unlike \`search_codebase\`. The \`engine\` field tells you which backend ran (\`"ripgrep"\` or a \`"fallback"\`-prefixed string) — both are equally trustworthy, ripgrep is just faster.
+- Rule of thumb: unfamiliar codebase → \`get_repo_map\` first. Know the exact text → \`grep_codebase\`. Only have a rough idea → \`search_codebase\`. These are complementary, not redundant — using the wrong one for the job wastes tool calls, not just tokens.
+
+## 5. Language/file-type coverage — same discipline, every type
 - Python / JS / TS / JSX / TSX / Go / Rust / C / C++ / Java / Ruby / PHP — same read→edit→verify loop.
 - HTML / CSS / JSON / YAML / TOML / XML / SQL — same loop; validate syntax with a fast tool when one is available (\`python -m json.tool\`, \`node --check\`, etc.).
 - Shell / Batch / PowerShell scripts — verify with a dry run or syntax check before assuming they work.
@@ -1150,108 +1164,78 @@ Provider-agnostic core discipline. Applies identically whether you are Claude, G
 - Arduino (.ino) — compile-check only, never claim upload/flash succeeded; this environment has no board/port control.
 - Markdown / plaintext / docs — precision still applies: don't restructure headings or reflow prose the user didn't ask you to touch.
 
-## 5. Convention-matching — detect before you write
+## 6. Convention-matching — detect before you write
 - Indentation: match tabs vs spaces and width exactly as seen in the file being edited.
 - Naming: match camelCase / snake_case / PascalCase already in use in that file/module.
 - Imports: match existing import grouping/ordering style; don't introduce a new dependency when an already-imported one covers the need.
 - Tests: match the existing test framework and file-naming pattern if the project has one; don't invent a second one.
 - Error handling: match the existing pattern (exceptions vs error-return vs Result types) rather than substituting your own default.
 
-## 6. Terminal access — real, visible, multi-session
+## 7. Terminal and command execution
 - The IDE has real multi-session terminals (PowerShell/CMD/Bash/zsh/WSL), not a sandboxed fake shell.
 - \`run_in_terminal\` targets the terminal tab the user currently has focused/visible — they see every character. It is NOT OS-sandboxed — it runs with the same access the user's own terminal has, by design, since the user is watching it live.
-- \`run_command\` is the isolated/background alternative — use it for quick checks you don't need the user to watch. On Linux/macOS it runs inside a real OS-level sandbox (bubblewrap/Seatbelt): read access everywhere, write access ONLY inside the project folder, no network by default. On Windows it's hardened (jailed to the project folder, minimal env) but not syscall-sandboxed — see the \`sandboxType\`/\`sandboxed\` fields on every result if you need to know which applies. This does not change what you should attempt — never rely on the sandbox to justify a command you wouldn't otherwise run; it's a safety net, not permission to be less careful.
+- \`run_command\` is the isolated/background alternative — use it for quick checks you don't need the user to watch. On Linux/macOS it runs inside a real OS-level sandbox (bubblewrap/Seatbelt): read access everywhere, write access ONLY inside the project folder, no network by default. On Windows it's hardened (jailed to the project folder, minimal env) but not syscall-sandboxed — check the \`sandboxType\`/\`sandboxed\` fields on the result if you need to know which applies. This does not change what you should attempt — never rely on the sandbox to justify a command you wouldn't otherwise run; it's a safety net, not permission to be less careful.
 - Never assume a terminal is in a particular directory — the working directory is the opened project root; \`cd\` explicitly in the command if you need elsewhere.
 - Long-running/interactive processes (servers, watchers, REPLs) belong in \`run_in_terminal\`, never in \`run_command\` — background execution has no interactive stdin path.
 - Destructive shell patterns (\`rm -rf\`, force-push, \`sudo\`, disk-level commands) are approval-gated by design — do not attempt to route around this via a different tool.
 - If a \`run_command\` result has \`cancelled: true\`, the user pressed Stop mid-execution. Do not silently retry the same command — acknowledge it was stopped and ask what they'd like next, unless they've already told you to continue.
 
-## 7. Permission boundary
+## 8. Permission boundary
 - \`.env\`, \`package.json\`, git internals, and key files trigger approval by design — this is a safety feature, never an obstacle to engineer around.
 - Do not attempt indirect writes to critical files via \`run_command\`/\`run_in_terminal\` to dodge the \`write_file\`/\`edit_file\` approval check — the intent of the boundary is what matters, not the literal tool name.
 - \`delete_file\` always requires approval; never call it speculatively.
+- Beyond the critical-file/command rules above, the user can independently set each of six tool categories — read, write, delete, execute, network, subagents — to allow / ask / deny. Both layers apply; neither replaces the other.
+- A tool error mentioning "Blocked by permission settings" means that category is set to deny — do not retry the same call, do not try a different tool as a workaround to achieve the same effect (e.g. don't shell out via \`run_command\` to read a file if \`read\` is denied), and tell the user plainly what's blocked.
+- A category set to \`ask\` means an approval prompt on every call in it, even something that would normally be silent — that's intentional caution the user configured, not a bug.
+- \`delete\` has no fully-silent mode by design — even with \`delete\` set to \`allow\`, every \`delete_file\` call still prompts. Only \`delete: deny\` changes that.
+- If you get blocked and genuinely need that access to continue, you may call \`request_permission_escalation\` ONCE with a brief honest reason — this surfaces a real prompt to the user, it does not grant anything itself. If denied, stop trying that category for the rest of this task and say so plainly. Do not call it speculatively before actually being blocked, and do not call it repeatedly for the same category. An approved escalation only ever reaches "ask" (never a silent "allow"), lasts only for this session, and is never saved to disk.
 
-## 8. Planning and communication
-- Trivial task (1-2 tool calls): just do it, minimal narration.
-- Multi-step task: form a short internal plan first, then execute — don't think out loud at length before acting.
-- Stuck after 2-3 genuine attempts at the same error: stop, state exactly what's blocking and what you ruled out. Do not loop indefinitely on the same failing approach.
+## 9. Sub-agent delegation (\`spawn_subagents\`)
+- Valid: "write unit tests for module A" + "update README for module B" simultaneously — no shared state, no ordering dependency.
+- Invalid: splitting a single file's edits across sub-agents — race conditions on the same file.
+- Invalid: a task where step 2 needs step 1's output — that's sequential, not parallel, do it yourself directly.
+- Recursion: a sub-agent you spawn may itself call \`spawn_subagents\` to delegate further, up to 2 levels below the top-level agent. A sub-agent at the deepest allowed level simply won't have \`spawn_subagents\` in its own tool list, and gets a clear \`{ok:false}\` error if it tries anyway — this is a hard cap, not a suggestion. Recursion is for when a sub-task turns out to have genuinely independent pieces of its own worth splitting further; it is not a substitute for just doing sequential work yourself.
+- Budget: a hard cap of 12 total sub-agents across the WHOLE tree, shared across every \`spawn_subagents\` call anywhere in it regardless of depth — not 12 per call. Once exhausted, further spawn attempts are refused with a clear error; do the remaining work directly instead of trying to spawn more.
+- Each sub-agent gets a step budget (a handful of tool calls) — scope each sub-task to something completable within that, not an open-ended task.
+- Stopping the agent (the Stop button) cancels an entire in-flight sub-agent tree, not just the top-level call.
+
+## 10. System behavior you should be aware of (but don't control directly)
+- **Cancellation:** the user can press Stop at any point — this aborts whatever's in flight and stops the loop from starting anything new. If your own response comes back as \`{aborted: true}\`, that call was cancelled — don't treat it as an error to work around, just stop. Never fight cancellation by immediately re-issuing the same call.
+- **Cost/token budget caps:** the user may configure a per-project token and/or dollar cap. A \`{budgetExceeded: true, reason}\` response means no further AI calls will succeed until the user raises the cap or resets usage — say the reason back plainly and stop; being concise is good practice on its own merits but will not bypass a hit cap.
+- **Context compaction:** on long sessions, older turns get automatically summarized into one condensed message once the transcript grows large. A message near the start of your history that looks like \`[Compacted summary of N earlier messages ...]\` is ground truth about what already happened (files touched, decisions made, open TODOs) — treat it the same as if you remembered it directly, and don't re-do work it describes as already complete. This only happens between your turns, never mid-tool-call, and never removes the most recent turns.
+- **Auto-checkpointing:** every successful \`write_file\`/\`edit_file\`/\`delete_file\` is committed to git automatically, one commit per change, if the project is a git repo. You do not need to run \`git commit\` yourself for routine changes. If the project isn't a git repo, this is silently skipped — expected, not an error.
+
+## 11. Test-after-edit auto-verification
+- If the user has enabled auto-verify (Agent Settings), a successful \`write_file\`/\`edit_file\` on a code file may come back with an extra \`verification\` field showing whether the project's configured test command passed — the SAME tool call's result, not a separate step you need to trigger.
+- \`verification.skipped === true\` means it did not run this time (debounced, or the file type isn't covered) — treat as "unknown," not confirmation the change works.
+- \`verification.ok === false\` is a real failure (or a real timeout if \`verification.timedOut\`) — do not report the edit as successful. Read \`verification.output\`, diagnose, and fix it, exactly as if the user had pasted a failing test run.
+- If no \`verification\` field is present at all, nothing validated your change automatically — section 14's honesty rules still apply in full.
+
+## 12. Delegation vs. direct work — a quick decision guide
+Reach for \`spawn_subagents\` only when a task has genuinely independent pieces; otherwise do it directly. Reach for \`get_repo_map\` before repeated blind \`read_file\` calls in unfamiliar territory. Reach for \`grep_codebase\` over \`search_codebase\` the moment you know the exact text you want. None of these are mandatory ceremony — using the wrong tool, or an extra tool call that adds no information, is itself a quality problem, not just a cost one.
+
+## 13. MCP tools
+- If the user has connected any MCP (Model Context Protocol) servers, their tools appear in your tool list already namespaced as \`mcp_<servername>_<toolname>\` — call them exactly like any built-in tool, no special handling needed.
+- These tools come from external processes the user explicitly configured and connected — you have no more (and no less) insight into what they do than their description tells you. If a description is vague or a call fails confusingly, say so plainly rather than guessing at undocumented behavior.
+- MCP tool calls are gated by the same \`execute\` permission category as \`run_command\` — a denial or approval prompt there is expected, not a bug.
+- You cannot connect/disconnect/configure MCP servers yourself — that's a user action in Agent Settings → MCP Servers. If a task needs a capability you don't have and no relevant MCP tool is present, say so rather than attempting a workaround.
+
+## 14. Failure honesty
+- A tool/compiler/interpreter not installed → say exactly that, name the missing tool, don't silently skip the step.
+- A test that fails → show the real failure output, don't paraphrase it away.
+- A task partially done → say precisely how far you got and what remains, never imply full completion.
 - Never fabricate output, file contents, or command results you have not actually seen from a tool call.
+- Stuck after 2-3 genuine attempts at the same error: stop, state exactly what's blocking and what you ruled out. Do not loop indefinitely on the same failing approach.
 
-## 9. Persistent memory discipline
-- Durable, project-specific facts (build quirks, "don't do X because Y", conventions not obvious from the code) go in \`.liteide/agent-memory.md\` via \`edit_file\`.
+## 15. Persistent memory discipline
+- Durable, project-specific facts (build quirks, "don't do X because Y," conventions not obvious from the code) go in \`.liteide/agent-memory.md\` via \`edit_file\`.
 - Keep entries short, factual, dated if relevant — not a running journal.
 - Prune entries that are no longer true instead of letting stale guidance accumulate.
 - Do not duplicate this skill file's contents into memory — memory is for project-specific facts, this file is the universal baseline.
 
-## 10. Parallelism rules (\`spawn_subagents\`)
-- Valid: "write unit tests for module A" + "update README for module B" simultaneously — no shared state, no ordering dependency.
-- Invalid: splitting a single file's edits across sub-agents — race conditions on the same file.
-- Invalid: a task where step 2 needs step 1's output — that's sequential, not parallel.
-- Cap awareness: sub-agents run with a reduced tool set (no further spawning) and a step budget — scope each sub-task to something completable in a handful of tool calls.
-
-## 11. Failure honesty
-- A tool/compiler/interpreter not installed → say exactly that, name the missing tool, don't silently skip the step.
-- A test that fails → show the real failure output, don't paraphrase it away.
-- A task partially done → say precisely how far you got and what remains, never imply full completion.
-
-## 12. Auto-checkpointing (v1.2.0)
-- Every successful write_file/edit_file/delete_file is committed to git automatically, one commit per change, if the project is a git repo. You do not need to run git commit yourself for routine changes — doing so is redundant and can create duplicate/conflicting commits.
-- This means every change you make already has a clean rollback point via git log / git revert — act with that safety net in mind, but it does not lower the bar for the approval-gated actions in section 7; those rules are unchanged.
-- If the project is not a git repo, checkpointing is silently skipped — this is expected, not an error, and needs no special handling from you.
-
-## 13. Cancellation (v1.3.0)
-- The user can press Stop at any point — this aborts whatever single call is currently in flight (an AI call or a \`run_command\`) and stops the loop from starting anything new after it.
-- If your own response comes back as \`{aborted: true}\`, that call was cancelled — do not treat it as an error to work around, just stop.
-- Never fight cancellation by immediately re-issuing the same call — if the user wanted it retried they will say so.
-
-## 14. Cost/token budget caps (v1.3.0)
-- The user may configure a per-project token and/or dollar cap. If a call to you returns \`{budgetExceeded: true, reason}\`, no further AI calls will succeed until the user raises the cap or resets usage — say the reason back to them plainly and stop; do not attempt another tool call expecting it to "get through."
-- This is a hard external limit, not a suggestion to be more token-efficient — being concise is still good practice on its own merits, but it will not bypass a hit cap.
-
-## 15. Context compaction (v1.3.0)
-- On long sessions, older turns get automatically summarized into a single condensed message once the transcript grows large, to stay within context/budget limits. You may see a message near the start of your history that looks like \`[Compacted summary of N earlier messages ...]\` — treat its contents as ground truth about what already happened (files touched, decisions made, open TODOs), the same as if you remembered it directly. Do not re-do work described as already complete in a compaction summary without checking first.
-- Compaction only happens between your turns, never mid-tool-call, and it never removes the current, most recent turns — only older, already-completed ones.
-
-## 16. Test-after-edit auto-verification (v1.4.0)
-- If the user has enabled auto-verify (Agent Settings), a successful \`write_file\` or \`edit_file\` on a code file may come back with an extra \`verification\` field showing whether the project's configured test command passed — this is the SAME tool call's result, not a separate step you need to remember to trigger.
-- \`verification.skipped === true\` means it did not run this time (debounced, or the edited file type isn't covered) — this is not a pass or a fail, treat it as "unknown," not as confirmation the change works.
-- \`verification.ok === false\` is a real failure (or a real timeout if \`verification.timedOut\`) — do not report the edit as successful. Read \`verification.output\`, diagnose, and fix it, the same as if the user had pasted you a failing test run.
-- If verification is not enabled at all (no \`verification\` field present), nothing has validated your change automatically — the honesty rules in section 11 still apply in full: don't imply something is tested when it hasn't been.
-
-## 17. Per-category permission toggles (v1.5.0)
-- The user can set each tool category (read, write, delete, execute, network, subagents) to allow / ask / deny independently, on top of the existing critical-file and critical-command approval rules — both layers apply, neither replaces the other.
-- If a tool call returns an error mentioning "Blocked by permission settings," that category is set to deny — do not retry the same call, do not try a different tool as a workaround to achieve the same effect (e.g. don't shell out via run_command to read a file if read is denied), and tell the user plainly what's blocked.
-- If a category is set to ask, expect an approval prompt on every call in that category, even for something that would normally be silent (e.g. reading an ordinary file) — this is intentional caution the user configured, not a bug.
-- delete has no fully-silent mode by design — even with delete set to allow, you will still see an approval prompt for every delete_file call. Only delete: deny changes that.
-
-## 18. Requesting elevated access, and edit_file recovery (v1.6.0)
-- If you get blocked by permission settings and genuinely need that access to continue, you may call \`request_permission_escalation\` ONCE with a brief honest reason — this surfaces a real prompt to the user, it does not grant anything itself. If denied, stop trying that category for the rest of this task and say so plainly. Do not call it speculatively before actually being blocked, and do not call it repeatedly for the same category.
-- An approved escalation only ever reaches "ask" (never a silent "allow"), lasts only for this session, and is never saved to disk — the user's saved settings are untouched.
-- \`edit_file\` failures (old_str not found, or ambiguous) now include the file's current content directly in the error (\`currentContent\`) — use that to correct your next attempt instead of making a separate read_file call first.
-- \`search_codebase\` may return \`capped: true\` on very large projects (2000+ files) — this means the scan didn't cover the whole repo; treat results as partial and narrow your query or switch to \`grep_codebase\` for an exact-match sweep of the full tree (it has no file-count cap, only a match-count cap).
-
-## 19. Exact-match search — \`grep_codebase\` (v1.7.0)
-- Use \`grep_codebase\` when you need EVERY occurrence of a specific symbol, string, import, or exact phrase — e.g. "every call site of parseConfig", "every file importing lodash", "where is API_BASE_URL defined." \`search_codebase\` is relevance-ranked and can bury or drop a rare exact match; \`grep_codebase\` cannot, it returns every literal line that matches.
-- Defaults to a literal/fixed-string match, not regex — pass \`fixed_strings: false\` only if you deliberately want to write a regex pattern.
-- Results are capped at 300 matches; check \`truncated\` — if true, narrow the pattern or pass \`path\` to scope the search to a subdirectory rather than assuming those were the only matches.
-- The \`engine\` field on the result tells you which backend ran: \`"ripgrep"\` (fast, respects .gitignore-style ignores) or a fallback string starting with \`"fallback"\` (ripgrep isn't installed on this machine — still correct, just slower on very large trees). Either way the results themselves are equally trustworthy.
-
-## 20. Recursive sub-agents (v1.8.0)
-- \`spawn_subagents\` is no longer strictly one level deep — a sub-agent you spawn may itself call \`spawn_subagents\` to delegate further, up to 2 levels below the top-level agent. A sub-agent at the deepest allowed level will not have \`spawn_subagents\` in its own tool list at all, and if it tries anyway (e.g. via a text-based fallback parse) it gets a clear \`{ok:false}\` error, not a silent failure.
-- There is also a hard cap of 12 total sub-agents across the WHOLE tree, shared across every \`spawn_subagents\` call anywhere in it regardless of depth — not 12 per call. Once exhausted, further spawn attempts are refused with a clear error. If you hit this, do the remaining work directly instead of trying to spawn more.
-- Only delegate genuinely independent, parallelizable sub-tasks. Recursion is for when a sub-task turns out to have independent pieces of its own worth splitting further — it is not a substitute for just doing sequential work yourself.
-- Stopping the agent (the Stop button) now cancels an entire in-flight sub-agent tree, not just the top-level call — this was fixed as a prerequisite for allowing recursion at all.
-
-## 21. Architect fallback for edit_file (v1.9.0)
-- If \`edit_file\` fails on the SAME path several times in a row (default: 2, user-configurable in Agent Settings), and the user has enabled "Architect fallback" in Agent Settings, a separate focused pass automatically takes over — you'll see a system message about it. You don't need to do anything differently; just keep trying edit_file normally. If the fallback succeeds, its result appears in your tool history as if it were your own successful edit_file call.
-- This is opt-in and disabled by default — it costs an extra model call, so it's meant for cases where the same edit keeps failing to match, not as a first resort.
-- If it's enabled and you notice repeated edit_file failures on one file are NOT triggering a fallback message, the feature is simply off for this project (or the failure count hasn't reached the configured threshold yet) — that's not a bug, just check Agent Settings.
-
-## 22. Codebase orientation — \`get_repo_map\` (v1.10.0)
-- When you're working in a codebase you haven't explored yet (a fresh session, or a large project you haven't touched much), call \`get_repo_map\` FIRST, before reaching for \`read_file\`/\`search_codebase\` repeatedly to figure out "what's even here." It returns every recognized file's top-level functions/classes/types as single-line signatures — a structural overview for a small fraction of the context cost of reading files directly.
-- It is pattern-based, not a real parser (JS/TS, Python, Go, Rust, Java/Kotlin, C/C++, Ruby, PHP are covered). It can miss multi-line signatures or unusual formatting, and only files with at least one recognized symbol are included — treat it as a map for orientation, not ground truth. Confirm anything specific with \`read_file\` or \`grep_codebase\` before relying on it.
-- Pass \`focus_path\` (a path relative to the project root) to bias the map toward files near a specific area you're about to work in, when the whole-project view would be too broad.
-- On a large project, the map itself is pruned to the most relevant files (check \`outputTruncated\`) — narrow with \`focus_path\`, or fall back to \`grep_codebase\`/\`search_codebase\` for anything not shown.
+## 16. Planning and communication
+- Trivial task (1-2 tool calls): just do it, minimal narration.
+- Multi-step task: form a short internal plan first, then execute — don't think out loud at length before acting.
 `;
 
 // Seeds the skill on first project open. On later opens, if the on-disk file
@@ -1279,6 +1263,7 @@ function ensureUniversalSkillSeeded() {
 }
 
 ipcMain.handle('agent:setProjectRoot', async (_, root) => {
+  for (const name of [...mcpServers.keys()]) { try { await mcpDisconnect(name); } catch { /* best-effort */ } } // MCP servers are project-scoped (spawned with cwd=old projectRoot) — never carry a live connection across a project switch
   projectRoot = root;
   ensureUniversalSkillSeeded();
   lastVerifyAt = 0;
@@ -1905,6 +1890,238 @@ ipcMain.handle('agent:getRepoMap', async (_, opts = {}) => {
     ...(scanCapped ? { scanCapped: true } : {}),
     ...(outputTruncated ? { outputTruncated: true, warning: `${candidates.length} files had recognizable symbols but only the top ${REPOMAP_MAX_OUTPUT_FILES} (by relevance) are included — narrow with focus_path or use grep_codebase/search_codebase for anything not shown.` } : {}),
   };
+});
+
+// ── Minimal MCP client (stdio transport, JSON-RPC 2.0) ─────────────────────
+// Explicit scope decision: stdio transport only, not SSE/HTTP. Stdio is what
+// the overwhelming majority of real-world MCP servers actually use — every
+// reference server, and what Claude Desktop/Claude Code use for local
+// servers. SSE matters mainly for remote/hosted MCP servers, a meaningfully
+// different and larger surface (auth, reconnection, CORS-equivalent
+// concerns) that deserves its own follow-up rather than being squeezed in
+// here as an afterthought alongside stdio.
+//
+// Explicit scope decision: MCP server processes are NOT run through the
+// bwrap/Seatbelt sandbox agent:runCommand uses. Two reasons: (1) sandboxing
+// a persistent bidirectional stdio process correctly — wiring framed
+// JSON-RPC through bwrap/sandbox-exec on both sides while keeping the pipes
+// live — is meaningfully more complex than a one-shot timed command with
+// captured output, and is its own project; (2) real MCP servers often
+// legitimately need broad filesystem/network access to do their job (a
+// GitHub MCP server needs network, a filesystem MCP server needs broad file
+// access) — the "read/write only inside the project folder" sandbox model
+// that fits agent:runCommand doesn't fit MCP servers at all. The standing
+// safety boundary instead: the SAME explicit user consent as any other
+// command execution. Connecting a server, and every individual tool call
+// through it, is gated by the existing `execute` permission category —
+// deliberately not a new 7th category, since "you're running code you
+// configured" doesn't need a distinction from `run_command`.
+const mcpServers = new Map(); // serverName -> { proc, nextId, pending: Map<id,{resolve,reject}>, buffer, tools, connected }
+const MCP_SERVER_NAME_RX = /^[a-zA-Z0-9-]+$/; // no underscores — keeps `mcp_<server>_<tool>` unambiguous to parse (tool names commonly DO contain underscores)
+const MCP_CONNECT_TIMEOUT_MS = 15000;
+
+function mcpConfigPath() { return path.join(projectRoot, '.liteide', 'mcp-servers.json'); }
+function loadMcpConfig() {
+  try {
+    const cfg = JSON.parse(fs.readFileSync(mcpConfigPath(), 'utf8'));
+    return { servers: Array.isArray(cfg.servers) ? cfg.servers : [] };
+  } catch { return { servers: [] }; }
+}
+function saveMcpConfig(cfg) {
+  fs.mkdirSync(path.dirname(mcpConfigPath()), { recursive: true });
+  fs.writeFileSync(mcpConfigPath(), JSON.stringify(cfg, null, 2), 'utf8');
+}
+
+function withMcpTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`MCP ${label} timed out after ${ms}ms`)), ms)),
+  ]);
+}
+
+function mcpSend(state, method, params, isNotification = false) {
+  return new Promise((resolve, reject) => {
+    const msg = { jsonrpc: '2.0', method, params: params || {} };
+    if (!isNotification) {
+      const id = ++state.nextId;
+      msg.id = id;
+      state.pending.set(id, { resolve, reject });
+    }
+    try { state.proc.stdin.write(JSON.stringify(msg) + '\n'); }
+    catch (e) { if (!isNotification) { state.pending.delete(msg.id); reject(e); } return; }
+    if (isNotification) resolve();
+  });
+}
+
+function mcpHandleLine(state, line) {
+  if (!line.trim()) return;
+  let msg;
+  try { msg = JSON.parse(line); }
+  catch { return; } // some servers print non-JSON banners to stdout — ignore rather than crash the parser
+  if (msg.id !== undefined && state.pending.has(msg.id)) {
+    const { resolve, reject } = state.pending.get(msg.id);
+    state.pending.delete(msg.id);
+    if (msg.error) reject(new Error(msg.error.message || 'MCP server returned an error'));
+    else resolve(msg.result);
+  }
+  // Server-initiated notifications (e.g. logging, progress) are otherwise
+  // ignored for now — no UI surface for them yet.
+}
+
+async function mcpConnect(name) {
+  const existing = mcpServers.get(name);
+  if (existing && existing.connected) return { ok: true, alreadyConnected: true, tools: existing.tools };
+  const cfg = loadMcpConfig();
+  const serverCfg = cfg.servers.find(s => s.name === name);
+  if (!serverCfg) return { ok: false, error: `No MCP server configured named "${name}"` };
+
+  let proc;
+  try {
+    proc = spawn(serverCfg.command, serverCfg.args || [], {
+      cwd: projectRoot,
+      env: { ...process.env, ...(serverCfg.env || {}) },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  } catch (e) {
+    return { ok: false, error: `Failed to spawn "${serverCfg.command}": ${e.message}` };
+  }
+
+  const state = { proc, nextId: 0, pending: new Map(), buffer: '', tools: [], connected: false, name };
+  let stderrTail = '';
+  let spawnError = null;
+  proc.stderr.on('data', d => { stderrTail = (stderrTail + d.toString()).slice(-2000); });
+  proc.stdout.on('data', d => {
+    state.buffer += d.toString();
+    let idx;
+    while ((idx = state.buffer.indexOf('\n')) !== -1) {
+      const line = state.buffer.slice(0, idx);
+      state.buffer = state.buffer.slice(idx + 1);
+      mcpHandleLine(state, line);
+    }
+  });
+  proc.on('error', e => { spawnError = e; });
+  proc.on('exit', () => {
+    // A killed process's 'exit' event fires asynchronously, sometime after
+    // kill() is called — if a NEW connection under the same server name
+    // was already established by the time this fires (e.g. disconnect
+    // immediately followed by a fresh connect, or a project switch that
+    // reconnects quickly), deleting unconditionally here would remove that
+    // newer, valid entry instead of this stale one. Only clean up if we're
+    // still the current entry for this name.
+    if (mcpServers.get(name) === state) {
+      state.connected = false;
+      for (const { reject } of state.pending.values()) reject(new Error('MCP server process exited'));
+      state.pending.clear();
+      mcpServers.delete(name);
+    }
+  });
+
+  mcpServers.set(name, state);
+  try {
+    const initResult = await withMcpTimeout(
+      mcpSend(state, 'initialize', {
+        protocolVersion: '2024-11-05',
+        capabilities: {},
+        clientInfo: { name: 'LiteIDE', version: UNIVERSAL_SKILL_VERSION },
+      }),
+      MCP_CONNECT_TIMEOUT_MS, 'initialize'
+    );
+    if (spawnError) throw spawnError;
+    await mcpSend(state, 'notifications/initialized', {}, true);
+    const toolsResult = await withMcpTimeout(mcpSend(state, 'tools/list', {}), MCP_CONNECT_TIMEOUT_MS, 'tools/list');
+    state.tools = (toolsResult && toolsResult.tools) || [];
+    state.connected = true;
+    return { ok: true, tools: state.tools, serverInfo: initResult && initResult.serverInfo };
+  } catch (e) {
+    try { proc.kill(); } catch { /* best-effort */ }
+    mcpServers.delete(name);
+    return { ok: false, error: (spawnError ? spawnError.message : e.message) + (stderrTail ? ` (stderr: ${stderrTail.slice(-300)})` : '') };
+  }
+}
+
+async function mcpDisconnect(name) {
+  const state = mcpServers.get(name);
+  if (!state) return { ok: true, wasConnected: false };
+  try { state.proc.kill(); } catch { /* best-effort */ }
+  for (const { reject } of state.pending.values()) reject(new Error('Disconnected'));
+  state.pending.clear();
+  mcpServers.delete(name);
+  return { ok: true, wasConnected: true };
+}
+
+ipcMain.handle('agent:mcpListServers', async () => {
+  if (!projectRoot) return { ok: true, servers: [] };
+  const cfg = loadMcpConfig();
+  return {
+    ok: true,
+    servers: cfg.servers.map(s => {
+      const state = mcpServers.get(s.name);
+      return { name: s.name, command: s.command, args: s.args || [], connected: !!(state && state.connected), toolCount: state ? state.tools.length : 0 };
+    }),
+  };
+});
+
+ipcMain.handle('agent:mcpAddServer', async (_, server = {}) => {
+  if (!projectRoot) throw new Error('No project folder open');
+  if (!server.name || !MCP_SERVER_NAME_RX.test(server.name)) return { ok: false, error: 'Server name must contain only letters, numbers, and hyphens (no underscores or spaces — used to build unambiguous qualified tool names)' };
+  if (!server.command || !String(server.command).trim()) return { ok: false, error: 'command is required' };
+  const cfg = loadMcpConfig();
+  if (cfg.servers.some(s => s.name === server.name)) return { ok: false, error: `A server named "${server.name}" already exists — remove it first to reconfigure` };
+  cfg.servers.push({ name: server.name, command: server.command, args: Array.isArray(server.args) ? server.args : [], env: (server.env && typeof server.env === 'object') ? server.env : {} });
+  saveMcpConfig(cfg);
+  return { ok: true };
+});
+
+ipcMain.handle('agent:mcpRemoveServer', async (_, name) => {
+  if (!projectRoot) throw new Error('No project folder open');
+  await mcpDisconnect(name);
+  const cfg = loadMcpConfig();
+  const before = cfg.servers.length;
+  cfg.servers = cfg.servers.filter(s => s.name !== name);
+  saveMcpConfig(cfg);
+  return { ok: true, removed: cfg.servers.length < before };
+});
+
+ipcMain.handle('agent:mcpConnect', async (_, name) => {
+  if (!projectRoot) return { ok: false, error: 'No project folder open' };
+  const perm = checkCategoryPermission('execute');
+  if (perm === 'deny') return { ok: false, error: 'Blocked by permission settings (execute is set to deny)' };
+  if (perm === 'ask') { const approved = await requestApproval('run_command', { command: `[MCP] connect to server "${name}"` }); if (!approved) return { ok: false, error: 'Denied by user' }; }
+  return await mcpConnect(name);
+});
+
+ipcMain.handle('agent:mcpDisconnect', async (_, name) => await mcpDisconnect(name));
+
+ipcMain.handle('agent:mcpListTools', async () => {
+  const tools = [];
+  for (const [name, state] of mcpServers) {
+    if (!state.connected) continue;
+    for (const t of state.tools) {
+      tools.push({
+        name: `mcp_${name}_${t.name}`,
+        description: `[MCP:${name}] ${t.description || 'No description provided by the server.'}`,
+        parameters: (t.inputSchema && typeof t.inputSchema === 'object') ? t.inputSchema : { type: 'object', properties: {} },
+      });
+    }
+  }
+  return { ok: true, tools };
+});
+
+ipcMain.handle('agent:mcpCallTool', async (_, qualifiedName, args) => {
+  const m = String(qualifiedName || '').match(/^mcp_([a-zA-Z0-9-]+)_(.+)$/);
+  if (!m) return { ok: false, error: `Not a valid MCP tool name: ${qualifiedName}` };
+  const [, serverName, toolName] = m;
+  const state = mcpServers.get(serverName);
+  if (!state || !state.connected) return { ok: false, error: `MCP server "${serverName}" is not connected — connect it first` };
+  const perm = checkCategoryPermission('execute');
+  if (perm === 'deny') return { ok: false, error: 'Blocked by permission settings (execute is set to deny)' };
+  if (perm === 'ask') { const approved = await requestApproval('run_command', { command: `[MCP] ${serverName}.${toolName}(${JSON.stringify(args || {}).slice(0, 80)})` }); if (!approved) return { ok: false, error: 'Denied by user' }; }
+  try {
+    const result = await withMcpTimeout(mcpSend(state, 'tools/call', { name: toolName, arguments: args || {} }), MCP_CONNECT_TIMEOUT_MS, `tools/call ${toolName}`);
+    return { ok: true, result };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
 });
 
 // ── web_search / web_fetch ───────────────────────────────────────────────────

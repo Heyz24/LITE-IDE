@@ -803,6 +803,28 @@ html, body {
   outline:none; resize:vertical; margin-top:6px;
 }
 #skill-content-input:focus { border-color:var(--purple); }
+#mcp-overlay {
+  display:none; position:fixed; inset:0; z-index:100;
+  background:rgba(0,0,0,0.45); align-items:center; justify-content:center;
+}
+#mcp-overlay.show { display:flex; }
+#mcp-card {
+  width:520px; max-width:90vw; max-height:82vh; overflow-y:auto; border-radius:16px;
+  background:rgba(20,18,30,0.85); backdrop-filter:blur(32px) saturate(200%);
+  -webkit-backdrop-filter:blur(32px) saturate(200%);
+  border:1px solid var(--glass-b); border-top-color:var(--glass-b-top);
+  box-shadow:0 20px 60px rgba(0,0,0,0.5); padding:20px;
+}
+#mcp-list { margin:10px 0; display:flex; flex-direction:column; gap:6px; }
+.mcp-row {
+  display:flex; align-items:center; gap:8px; padding:7px 10px; border-radius:8px;
+  background:var(--glass-hi); border:1px solid var(--glass-b); font-size:12px; color:var(--t2);
+}
+.mcp-row .mcp-name { font-weight:600; color:var(--t1); }
+.mcp-row .mcp-status { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--t3); }
+.mcp-row .mcp-status.connected { color:var(--green,#34d399); }
+.mcp-row button { flex-shrink:0; }
+#mcp-add-form { display:flex; flex-direction:column; gap:6px; margin-top:10px; }
 #approval-overlay {
   display:none; position:fixed; inset:0; z-index:100;
   background:rgba(0,0,0,0.45); align-items:center; justify-content:center;
@@ -1017,6 +1039,7 @@ html, body {
           <button class="ai-save-btn" onclick="testAiConnection()" title="Send a tiny test message to confirm the key + model work">Test</button>
           <button class="ai-save-btn" onclick="runAgentSelfTest()" title="Exercise read/write/run tools end-to-end">Self-Test Tools</button>
           <button class="ai-save-btn" onclick="openSkillsModal()" title="Add a markdown skill file — best practices the agent reads before matching tasks">+ Skill</button>
+          <button class="ai-save-btn" onclick="openMcpModal()" title="Connect MCP servers to give the agent additional tools">🔌 MCP Servers</button>
           <label class="ai-autoapprove-label">
             <input type="checkbox" id="ai-autoapprove" style="accent-color:var(--purple)"> Auto-approve non-critical
           </label>
@@ -1079,6 +1102,23 @@ html, body {
       <div class="ac-btns">
         <button class="ac-btn deny" onclick="closeSkillsModal()">Close</button>
         <button class="ac-btn allow" onclick="saveSkillFromModal()">Save Skill</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="mcp-overlay">
+    <div id="mcp-card">
+      <div class="ac-title">🔌 <span>MCP Servers</span></div>
+      <div class="ac-detail">Connect Model Context Protocol servers to give the agent additional tools (stdio transport — the server runs as a local process you configure). Each tool call through a connected server is gated by the <code>execute</code> permission category, same as run_command.</div>
+      <div id="mcp-list"></div>
+      <div id="mcp-add-form">
+        <input id="mcp-name-input" class="sp-input" placeholder="Server name, e.g. 'filesystem' (letters/numbers/hyphens only)" autocomplete="off">
+        <input id="mcp-command-input" class="sp-input" placeholder="Command, e.g. 'npx'" autocomplete="off">
+        <input id="mcp-args-input" class="sp-input" placeholder="Args (space-separated), e.g. -y @modelcontextprotocol/server-filesystem /path" autocomplete="off">
+      </div>
+      <div class="ac-btns">
+        <button class="ac-btn deny" onclick="closeMcpModal()">Close</button>
+        <button class="ac-btn allow" onclick="addMcpServerFromModal()">Add Server</button>
       </div>
     </div>
   </div>
@@ -2418,6 +2458,63 @@ async function saveSkillFromModal() {
   toast('✨ Skill saved — the agent will read it when relevant');
 }
 
+async function openMcpModal() {
+  if (!currentFolder) { toast('⚠️ Open a project folder first'); return; }
+  await renderMcpList();
+  document.getElementById('mcp-name-input').value = '';
+  document.getElementById('mcp-command-input').value = '';
+  document.getElementById('mcp-args-input').value = '';
+  document.getElementById('mcp-overlay').classList.add('show');
+  releaseEditorFocusForModal('mcp-name-input');
+}
+function closeMcpModal() { document.getElementById('mcp-overlay').classList.remove('show'); }
+
+async function renderMcpList() {
+  const list = document.getElementById('mcp-list');
+  list.innerHTML = '';
+  const { servers } = await api.agent.mcpListServers();
+  if (!servers || !servers.length) { list.innerHTML = '<div style="font-size:11.5px;color:var(--t3)">No MCP servers configured yet — add one below.</div>'; return; }
+  for (const s of servers) {
+    const row = document.createElement('div');
+    row.className = 'mcp-row';
+    row.innerHTML = `<span class="mcp-name"></span><span class="mcp-status"></span><button class="ac-btn ${s.connected ? 'deny' : 'allow'} mcp-toggle-btn" style="padding:4px 10px;font-size:11px;"></button><span class="sk-del" title="Remove server">🗑️</span>`;
+    row.querySelector('.mcp-name').textContent = s.name;
+    const statusEl = row.querySelector('.mcp-status');
+    statusEl.textContent = s.connected ? `connected — ${s.toolCount} tool(s)` : 'not connected';
+    statusEl.classList.toggle('connected', s.connected);
+    const toggleBtn = row.querySelector('.mcp-toggle-btn');
+    toggleBtn.textContent = s.connected ? 'Disconnect' : 'Connect';
+    toggleBtn.addEventListener('click', async () => {
+      toggleBtn.disabled = true; toggleBtn.textContent = s.connected ? 'Disconnecting…' : 'Connecting…';
+      const r = s.connected ? await api.agent.mcpDisconnect(s.name) : await api.agent.mcpConnect(s.name);
+      if (!r.ok) toast('⚠️ ' + r.error);
+      else toast(s.connected ? `🔌 Disconnected from ${s.name}` : `✅ Connected to ${s.name} — ${(r.tools||[]).length} tool(s) available`);
+      await renderMcpList();
+    });
+    row.querySelector('.sk-del').addEventListener('click', async () => {
+      await api.agent.mcpRemoveServer(s.name);
+      await renderMcpList();
+      toast('🗑️ MCP server removed');
+    });
+    list.appendChild(row);
+  }
+}
+
+async function addMcpServerFromModal() {
+  const name = document.getElementById('mcp-name-input').value.trim();
+  const command = document.getElementById('mcp-command-input').value.trim();
+  const argsRaw = document.getElementById('mcp-args-input').value.trim();
+  if (!name || !command) { toast('⚠️ Give the server a name and a command'); return; }
+  const args = argsRaw ? argsRaw.split(/\s+/) : [];
+  const r = await api.agent.mcpAddServer({ name, command, args });
+  if (!r.ok) { toast('⚠️ ' + r.error); return; }
+  await renderMcpList();
+  document.getElementById('mcp-name-input').value = '';
+  document.getElementById('mcp-command-input').value = '';
+  document.getElementById('mcp-args-input').value = '';
+  toast('🔌 MCP server added — click Connect to start it');
+}
+
 
 // ═══════════════════════════════════════════
 //  SIDEBAR: PROJECT SEARCH & REPLACE
@@ -2893,6 +2990,7 @@ function checkpointAfterChange(relPath, message) {
 }
 
 async function execAgentTool(name, args, requestId) {
+  if (name.startsWith('mcp_')) return await api.agent.mcpCallTool(name, args);
   switch (name) {
     case 'read_file':   return await api.agent.readFile(args.path);
     case 'list_dir':     return await api.agent.listDir(args.path || '.');
@@ -2973,7 +3071,8 @@ async function runSubagentOrchestration(tasks, depth = 1, tree = null) {
   // re-checks depth before recursing (defense in depth, in case a
   // non-structured-tool-calling model tries to invoke it via the
   // extractToolCallFromText fallback parser despite it being absent from `tools`).
-  const subTools = depth >= MAX_SUBAGENT_DEPTH ? AGENT_TOOLS.filter(t => t.name !== 'spawn_subagents') : AGENT_TOOLS;
+  const allTools = await getAllAgentToolsCached();
+  const subTools = depth >= MAX_SUBAGENT_DEPTH ? allTools.filter(t => t.name !== 'spawn_subagents') : allTools;
   const log = document.getElementById('ai-chat-log');
 
   const headerCard = document.createElement('div');
@@ -3217,6 +3316,20 @@ async function getArchitectConfigCached() {
   return architectConfigCache;
 }
 
+// Tools from currently-connected MCP servers, merged alongside the built-in
+// AGENT_TOOLS — fetched once per top-level agent run (not per step/per tool
+// call) since the connected-server set doesn't change mid-run under normal
+// use, and re-fetching every step would be wasteful IPC chatter for no
+// benefit.
+let mcpToolsCache = null;
+async function getAllAgentToolsCached() {
+  if (mcpToolsCache === null) {
+    try { mcpToolsCache = (await api.agent.mcpListTools()).tools || []; }
+    catch { mcpToolsCache = []; }
+  }
+  return mcpToolsCache.length ? AGENT_TOOLS.concat(mcpToolsCache) : AGENT_TOOLS;
+}
+
 function stopAgentLoop() {
   agentStopRequested = true;
   if (currentAgentRequestId) api.agent.cancelRequest(currentAgentRequestId);
@@ -3303,6 +3416,7 @@ async function runAgentLoop() {
   agentBusy = true;
   agentStopRequested = false;
   architectConfigCache = null; // pick up any settings change made since the last run
+  mcpToolsCache = null; // pick up any MCP server connect/disconnect made since the last run
   editFailureStreak = { path: null, count: 0 };
   editFailureAttempts = [];
   document.getElementById('ai-send-btn').style.display = 'none';
@@ -3327,7 +3441,7 @@ async function runAgentLoop() {
     while (iterations++ < 12) {
       if (agentStopRequested) { thinkingEl.remove(); appendChatMsg('system', '⏹ Stopped by user.'); break; }
       currentAgentRequestId = crypto.randomUUID();
-      const res = await api.ai.chatOnce({ provider, model, messages: agentHistory, tools: AGENT_TOOLS, systemPrompt, requestId: currentAgentRequestId });
+      const res = await api.ai.chatOnce({ provider, model, messages: agentHistory, tools: await getAllAgentToolsCached(), systemPrompt, requestId: currentAgentRequestId });
       currentAgentRequestId = null;
       thinkingEl.remove();
       if (res.aborted) { appendChatMsg('system', '⏹ Stopped by user.'); break; }

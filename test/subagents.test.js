@@ -64,6 +64,7 @@ function loadSubagentModule({ chatOnceImpl, gateSubagentsImpl }) {
   if (!toolsMatch) throw new Error('AGENT_TOOLS not found');
   const execFn = extractFn(inlineScript, 'async function execAgentTool(name, args, requestId) {');
   const orchFn = extractFn(inlineScript, 'async function runSubagentOrchestration(tasks, depth = 1, tree = null) {');
+  const getAllToolsFn = extractFn(inlineScript, 'async function getAllAgentToolsCached() {');
   const extractToolCallFn = extractFn(inlineScript, 'function extractToolCallFromText(text) {');
   const maxDepthMatch = inlineScript.match(/const MAX_SUBAGENT_DEPTH = (\d+);/);
   const maxTreeMatch = inlineScript.match(/const MAX_SUBAGENTS_PER_TREE = (\d+);/);
@@ -76,10 +77,14 @@ function loadSubagentModule({ chatOnceImpl, gateSubagentsImpl }) {
     currentFolder: '/fake/project',
     agentStopRequested: false,
     activeTreeRequestIds: new Set(),
+    mcpToolsCache: [], // no MCP servers connected in these tests — getAllAgentToolsCached should just fall back to AGENT_TOOLS unchanged
     crypto: { randomUUID: () => 'id-' + Math.random().toString(36).slice(2) },
     api: {
       ai: { chatOnce: async (payload) => { chatOnceCalls.push(payload); return await chatOnceImpl(payload); } },
-      agent: { gateSubagents: async (n) => await (gateSubagentsImpl ? gateSubagentsImpl(n) : { ok: true }) },
+      agent: {
+        gateSubagents: async (n) => await (gateSubagentsImpl ? gateSubagentsImpl(n) : { ok: true }),
+        mcpListTools: async () => ({ ok: true, tools: [] }),
+      },
     },
     console,
   };
@@ -90,6 +95,7 @@ function loadSubagentModule({ chatOnceImpl, gateSubagentsImpl }) {
     ${extractToolCallFn}
     ${maxDepthMatch[0]}
     ${maxTreeMatch[0]}
+    ${getAllToolsFn}
     ${execFn}
     ${orchFn}
   `, sandbox);
