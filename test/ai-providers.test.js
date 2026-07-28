@@ -112,6 +112,27 @@ describe('AI provider adapters (mocked fetch — no real network/API calls)', ()
     assert.equal(fnCallPart.thoughtSignature, 'SIG_ABC', 'thoughtSignature must be echoed back on the function call part');
   });
 
+  test('Gemini: a tool result is sent with role "user", not "function" (regression test — the live API rejects role:"function" with "Role \'function\' is not supported")', async () => {
+    stubFetch({ candidates: [{ content: { parts: [{ text: 'done' }] } }] });
+    await mock.handleFns.get('ai:chatOnce')(EVT, {
+      provider: 'gemini', model: 'gemini-2.5-flash',
+      messages: [
+        { role: 'user', content: 'read package.json' },
+        { role: 'assistant', content: '', toolCalls: [{ id: 'call_1', name: 'read_file', args: { path: 'package.json' } }] },
+        { role: 'tool', tool_call_id: 'call_1', name: 'read_file', content: '{"ok":true}' },
+      ],
+      tools: [], systemPrompt: '',
+    });
+    // No 'function'-role content is ever valid to send — Gemini's `contents`
+    // array only accepts 'user' and 'model'.
+    assert.ok(!lastRequest.body.contents.some(c => c.role === 'function'), 'no content in the request may use role "function" — the live Gemini API rejects it outright');
+    const toolResultTurn = lastRequest.body.contents.find(c => c.parts?.some(p => p.functionResponse));
+    assert.ok(toolResultTurn, 'a functionResponse part must be present for the tool result');
+    assert.equal(toolResultTurn.role, 'user', 'the functionResponse part must be inside a role:"user" turn');
+    assert.equal(toolResultTurn.parts[0].functionResponse.name, 'read_file');
+    assert.deepEqual(toolResultTurn.parts[0].functionResponse.response, { result: '{"ok":true}' });
+  });
+
   test('OpenAI/Ollama text-only responses (no tool calls) parse cleanly', async () => {
     stubFetch({ choices: [{ message: { role: 'assistant', content: 'plain text reply' } }] });
     const result = await mock.handleFns.get('ai:chatOnce')(EVT, {

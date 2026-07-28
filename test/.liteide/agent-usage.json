@@ -2,7 +2,7 @@
   "totalInputTokens": 0,
   "totalOutputTokens": 0,
   "totalCostUsd": 0,
-  "callCount": 7,
+  "callCount": 15,
   "cap": {
     "maxTokens": null,
     "maxUsd": null
@@ -58,6 +58,70 @@
     },
     {
       "ts": 1784452385142,
+      "provider": "openai",
+      "model": "gpt-5.1",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "ts": 1785224390360,
+      "provider": "openai",
+      "model": "gpt-5.1",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "ts": 1785224390381,
+      "provider": "ollama",
+      "model": "qwen2.5-coder",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "ts": 1785224390395,
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-6",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "ts": 1785224390413,
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-6",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "ts": 1785224390434,
+      "provider": "gemini",
+      "model": "gemini-2.5-flash",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "ts": 1785224390442,
+      "provider": "gemini",
+      "model": "gemini-2.5-flash",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "ts": 1785224390454,
+      "provider": "gemini",
+      "model": "gemini-2.5-flash",
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "costUsd": 0
+    },
+    {
+      "ts": 1785224390471,
       "provider": "openai",
       "model": "gpt-5.1",
       "inputTokens": 0,

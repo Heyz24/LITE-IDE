@@ -1,6 +1,6 @@
 {
   "name": "lite-ide",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Lightweight IDE with Liquid Glass UI",
   "author": "Harshal",
   "main": "main.js",

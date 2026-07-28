@@ -643,7 +643,11 @@ async function callGemini(apiKey, model, messages, tools, systemPrompt, signal) 
       }
       return { role:'model', parts };
     }
-    if (m.role === 'tool') return { role:'function', parts: [{ functionResponse: { name: m.name, response: { result: m.content } } }] };
+    // Gemini's `contents` array only accepts role 'user' or 'model' — there
+    // is no 'function' role (older docs/SDKs suggested otherwise, but the
+    // live API rejects it: "Role 'function' is not supported"). A tool
+    // result goes in a 'user'-role turn with a functionResponse part.
+    if (m.role === 'tool') return { role:'user', parts: [{ functionResponse: { name: m.name, response: { result: m.content } } }] };
     return { role:'user', parts: [{ text: m.content }] };
   });
   const body = {
@@ -1111,9 +1115,9 @@ function requestApproval(action, detail) {
 
 // ── Universal Coding Agent skill — seeded into every project, provider-agnostic ──
 const UNIVERSAL_SKILL_NAME = 'universal-coding-agent.md';
-const UNIVERSAL_SKILL_VERSION = '2.1.0';
-const UNIVERSAL_SKILL_CONTENT = `<!-- LiteIDE Universal Coding Agent Skill — v2.1.0 -->
-# Universal Coding Agent Skill — v2.1.0
+const UNIVERSAL_SKILL_VERSION = '2.2.0';
+const UNIVERSAL_SKILL_CONTENT = `<!-- LiteIDE Universal Coding Agent Skill — v2.2.0 -->
+# Universal Coding Agent Skill — v2.2.0
 
 Provider-agnostic core discipline. Applies identically whether you are Claude, GPT, Gemini, or a local Ollama model — this is plain instruction text, not a provider-specific feature. Every directive below is a hard rule, not a suggestion, unless marked "prefer."
 

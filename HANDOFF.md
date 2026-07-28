@@ -1,50 +1,56 @@
 # LiteIDE Agent — Handoff Status (updated)
 
-Upload this file + current `main.js`/`preload.js`/`src/index.html`/`package.json`/`README.md` + the `test/` directory (all files, incl. `test/helpers/mock-electron.js` and `test/fixtures/mock-mcp-server.js`) + `agent-sandbox.js` to a new chat to continue.
+Upload this file + current `main.js`/`preload.js`/`src/index.html`/`package.json`/`README.md` + the full `test/` directory (incl. `test/helpers/mock-electron.js`, `test/fixtures/mock-mcp-server.js`) + `agent-sandbox.js` to a new chat to continue.
 
-**⚠️ CRITICAL: replace the entire `test/` directory wholesale, every time. Do not merge or cherry-pick individual test files across delivered versions.** `main.js`/`src/index.html` and the test files that verify them are a matched set — a test file from an older delivery run against a newer `main.js` will produce confusing failures that look like real bugs but aren't. This exact thing happened between v1.9.0 and v2.0.0 (see below) — worth reading even though it's now fixed, because it will happen again with any future partial update.
+**⚠️ Replace the entire `test/` directory wholesale, every time — never mix files across versions.** As of v2.2.0, `npm test` will now catch this loudly and immediately if you slip — see below — but the right habit is to never let it happen in the first place.
 
-## Current state: v2.1.0
-- **v2.1.0** (package.json version tracks the skill version — bump both together every time), agent skill file **v2.1.0**
-- **225/225 tests passing** via `npm test`, real-verified in this environment, across 18 test files, re-run 3x consecutively with zero flakiness
-- Every item in the original v3 gap-analysis report is done (completed at v2.0.0) — v2.1.0 is a skill-file quality/accuracy rewrite, no new capability
+## Current state: v2.2.0
+- **v2.2.0** (package.json version tracks the skill version — bump both together every time), agent skill file **v2.2.0**
+- **226/226 tests passing** via `npm test`, real-verified, 18 test files, re-run 3x consecutively with zero flakiness
 
-## 🩹 Diagnosed this session: a real user-reported test failure, traced to a stale file (not a code bug)
-User ran `npm test` on their real machine and got 143/157 passing with 9 failures, all `ReferenceError: getAllAgentToolsCached is not defined` in `test/subagents.test.js`. Root cause: their `main.js` was current (v2.0.0+, includes the MCP client and `getAllAgentToolsCached`), but their `test/subagents.test.js` was an OLDER copy from before that function existed — it doesn't extract or stub it, so the `vm` sandbox throws the moment `runSubagentOrchestration` (which now calls `getAllAgentToolsCached` to merge in MCP tools) executes.
+## 🩹 Fixed this version: a real bug from live use
+User hit `Role 'function' is not supported` from the Gemini API on every tool-using turn. Real bug: the Gemini adapter sent tool results with `role: 'function'` in `contents` — the live API only accepts `user`/`model`. Fixed: tool results now go in a `role: 'user'` turn with a `functionResponse` part. Regression test added. **This was caught from a real screenshot of the app actually failing in use — exactly the kind of bug that 226 passing synthetic tests cannot catch on their own, because none of them call the real Gemini API.** See "Path to A" below — this is the central lesson driving item 1.
 
-**This is not a bug in anything delivered.** The current `test/subagents.test.js` (confirmed in this session, 11/11 passing standalone) already extracts `getAllAgentToolsCached` and stubs `api.agent.mcpListTools`. The user's local copy of that one file predates the v2.0.0 MCP merge. Their `package.json` test script was already updated to v2.0.0 (their own paste showed the full command including `mcp.test.js`), so this was a partial-update artifact — some files replaced, others not — not a deliberate action.
+## 🔧 Fixed this version: the update-application failure mode itself
+Added a version-consistency guard to `test/helpers/mock-electron.js`: it now checks `main.js`'s `UNIVERSAL_SKILL_VERSION` against an `EXPECTED_LITEIDE_VERSION` constant in the harness, and throws one clear, actionable error immediately if they don't match, instead of letting a stale file surface as a confusing `ReferenceError` three test files later. Verified working (deliberately desynced it, confirmed the clear error fires, restored it).
 
-**If this shape of failure ever recurs** (a `ReferenceError` for a function that clearly exists in `src/index.html` when you grep it, inside a `test/*.test.js` file that uses `vm` extraction): the test file's extraction list is out of sync with the source it's extracting from. Fix is always the same — get the matching test file from the same delivery as the source it tests.
+**Checklist addition: bump `EXPECTED_LITEIDE_VERSION` in `test/helpers/mock-electron.js` every time `UNIVERSAL_SKILL_VERSION` bumps in `main.js`.** This is now as mandatory as bumping package.json's version.
 
-## 🩹 Fixed this session: skill file had an internal contradiction
-Through v1.2.0 → v2.0.0, the embedded skill file grew by appending a new numbered section per feature rather than being rewritten as a whole document each time. After 12 appends this had a real, live contradiction: section 10 ("Parallelism rules") still said sub-agents run with "a reduced tool set (no further spawning)" — true before v1.8.0, **false** after it, since v1.8.0 added recursion up to 2 levels deep. Section 20, later in the same file, correctly described the recursion — so the model was reading two directly contradictory instructions in the same document, and section 20 happened to win only because it appeared later, which is not a reliable way for a document to be correct.
+---
 
-The user caught this by uploading an old seeded copy from one of their real project folders (the skill file gets auto-seeded per-project, so stale copies genuinely accumulate across a user's various projects if the source document itself was ever wrong).
+## Path to a genuine, unqualified A
 
-**Fixed with a full rewrite, not another append**: v2.1.0 is one coherent 16-section document. Same information, reorganized (search/grep/repo-map now get one comparative section — "which of these three tools for which job" — instead of being scattered across three separately-appended sections; permissions and escalation are unified instead of split across two "vN.N.0"-tagged sections), contradiction removed. No tool behavior changed, only the document describing it to the model.
+The last assessment landed on B+/A- with two honest drags: an unverified UI fix, and — the bigger one — an update/delivery process that had already caused one real confusing failure. This version fixes the second problem structurally (the version guard) and the first bug class showed up for real (Gemini). Here's what closing the remaining gap actually requires, in priority order, with what's already done vs. still open.
 
-**Going forward: rewrite this file wholesale on any change substantial enough to touch more than one existing section's meaning, not append-only by default.** Appending was fine for the first several additions because each one was genuinely additive; it stopped being fine once a later addition (recursion) changed the truth of something an earlier section asserted.
+### 1. Real-model integration testing (highest priority — this is what caught the Gemini bug, and it was luck that it surfaced at all)
+**Problem:** all 226 tests mock `fetch` — none of them call a real provider API. The Gemini bug shipped because nothing in the suite exercises the real wire format against the real endpoint. Synthetic tests prove internal consistency, not that the bytes sent over the wire are what the API actually wants.
+**Status: not started.**
+**Concrete next step:** an opt-in, network-gated test tier — e.g. `npm run test:live` (separate from `npm test`, since it needs real API keys and costs real money) that makes one minimal real call per provider (OpenAI, Anthropic, Gemini, a local Ollama if running) with a trivial tool-calling round-trip, and asserts it doesn't error. Skipped automatically when no key is present, so it never blocks a normal `npm test` run, but gives a real way to catch the next Gemini-shaped bug before a user does. This is the single highest-leverage thing left to build.
 
-## ✅ Complete feature list (all real, all tested — see README's Architecture Reference for full detail on each)
-Core file I/O, three-mode codebase search (RAG/exact-match/structural map), OS-level sandboxed command execution (Linux/macOS), real multi-session terminals, recursive multi-agent delegation with hard cost caps, per-project token/USD budget caps, context compaction, test-after-edit auto-verification, six-category permission system with session-scoped escalation, git auto-checkpointing, weak-model recovery (architect fallback), and MCP client for external tool integration.
+### 2. Confirm the two "diagnosed but not verified" fixes
+- Agent Skills modal focus-stealing fix (v1.9.0) — still not behaviorally confirmed in a real browser. **Action: try it, report back.**
+- Now that a real screenshot caught a real bug once, the same channel (screenshot + exact error text, as happened here) is clearly a working feedback loop — keep using it for anything that looks wrong in actual use, not just UI issues.
 
-## Known limitations (explicit scope decisions, not oversights)
-- Windows has no real OS-level sandbox for `agent:runCommand` (no dependency-free native primitive exists)
-- `get_repo_map` is regex-based, not a real parser (explicit tradeoff vs. tree-sitter's native-dependency cost)
-- MCP client is stdio-only, not SSE/HTTP (explicit tradeoff — SSE is a materially different, larger feature)
-- MCP servers run outside the sandbox that wraps `run_command` (persistent bidirectional stdio sandboxing is a much bigger problem than one-shot commands, and MCP servers often legitimately need broad FS/network access anyway)
-- The Agent Skills modal focus-stealing fix (v1.9.0) has not been behaviorally confirmed in a real browser — **please verify and report back**
+### 3. Dogfood against a real weak/local model
+Architect fallback is only synthetically tested against a scripted "model" that behaves exactly as specified. It has never been run against an actual small Ollama model failing in its own idiosyncratic ways. **Action:** a real session with a small local model (something known to struggle with structured tool calls) on a real multi-file task, with architect fallback enabled, watching whether it actually recovers well in practice — not just whether the code path executes correctly in isolation.
 
-## Ground rules that have caught real bugs every time — keep these
+### 4. The two explicit scope decisions, revisit only if they start actually costing something
+- Windows sandboxing gap (no dependency-free native primitive exists) — leave as documented until either a native-addon approach becomes worth the investment, or Windows usage reveals it's actually a problem, not just a theoretical asymmetry with Linux/macOS.
+- MCP SSE/HTTP transport — leave stdio-only until a specific remote MCP server someone actually wants to use requires it. Building transport support speculatively, before a concrete need, is exactly the kind of unforced complexity this project has otherwise avoided.
+
+### What does NOT need more work
+Everything covered by the 226 real tests — file I/O, all three search modes, sandboxed execution, recursive delegation with real caps, budget enforcement, compaction, verification, permissions, escalation, the MCP client's protocol handling, checkpointing — is solid. The gap to A was never "more features," it was "has this actually been run against the real, messy outside world" (real provider APIs, real weak models, a real browser, a real multi-version update). Item 1 above is that gap's biggest single piece.
+
+## Ground rules — keep these, now including the two added this version
 - Real tests only, including real subprocesses where the feature involves them
 - New top-level file → check `package.json` `build.files` immediately
 - Update README's Architecture Reference + known-gaps list every time
-- Bump skill file version + package.json version together
-- **Rewrite the skill file wholesale when a change affects more than one existing section's truth — don't append a section that contradicts an earlier one**
-- Push back if something in the report is wrong/not worth it, or if a "default" choice needs to be made explicit rather than assumed
-- One gap at a time, full rigor, beats several done shallowly
-- If something can't be verified (no real browser, etc.), say so explicitly rather than claiming false confidence
-- **When applying an update, replace whole directories, don't cherry-pick files across versions**
+- Bump skill file version + package.json version + `EXPECTED_LITEIDE_VERSION` in the test harness, all together, every time
+- Rewrite the skill file wholesale when a change affects more than one existing section's truth — don't append a section that contradicts an earlier one
+- When applying an update, replace whole directories, never cherry-pick files across versions — and as of v2.2.0, doing this wrong now fails loudly and immediately instead of confusingly
+- Push back if something in the report is wrong, or a "default" needs to be made explicit
+- One gap at a time, full rigor
+- If something can't be verified, say so explicitly — this is exactly how the skills-modal fix and the "path to A" above stay honest instead of overclaimed
 
 ## Suggested next step
-With the original report fully closed out and the skill file now internally consistent, next steps are open-ended: verify the skills-modal fix in a real browser, decide whether SSE/HTTP MCP transport or tree-sitter-based repo mapping is worth its added complexity, or address whatever friction actual daily use surfaces. Worth asking directly rather than guessing at what matters most.
+Item 1 (real-model integration test tier) is the highest-leverage remaining work and the direct lesson from this session's bug. Worth a dedicated session: which providers to cover, how to keep API costs near zero (one trivial call per provider, not a full suite), and how to structure it so it never blocks a normal contributor without API keys.

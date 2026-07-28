@@ -63,6 +63,20 @@ function createMockElectron() {
   };
 }
 
+// This test harness ships as part of the SAME delivered version as the
+// main.js it tests. If someone updates main.js/src/index.html but keeps an
+// older test/ directory (or vice versa), tests that use `vm` to extract and
+// execute functions directly from the source (compaction/subagents/
+// architect-logic tests) will fail with a raw `ReferenceError` for whatever
+// function was added since — which looks like a real bug and isn't one.
+// Catch that mismatch here, once, with an error that says exactly what's
+// wrong and how to fix it, instead of letting it surface as a confusing
+// failure three files later.
+//
+// BUMP THIS whenever UNIVERSAL_SKILL_VERSION bumps in main.js — this is a
+// checklist item, same as bumping package.json's version.
+const EXPECTED_LITEIDE_VERSION = '2.2.0';
+
 // Requires `mainPath` with `require('electron')` transparently swapped for a
 // fresh mock. Returns the mock's captured handlers/events plus a restore fn.
 function loadMainWithMockElectron(mainPath) {
@@ -81,6 +95,19 @@ function loadMainWithMockElectron(mainPath) {
     moduleExports = require(mainPath);
   } finally {
     Module._load = originalLoad; // only intercept during this one require
+  }
+
+  if (moduleExports.UNIVERSAL_SKILL_VERSION && moduleExports.UNIVERSAL_SKILL_VERSION !== EXPECTED_LITEIDE_VERSION) {
+    throw new Error(
+      `\n\nVERSION MISMATCH: main.js reports UNIVERSAL_SKILL_VERSION "${moduleExports.UNIVERSAL_SKILL_VERSION}", ` +
+      `but this copy of test/helpers/mock-electron.js expects "${EXPECTED_LITEIDE_VERSION}".\n` +
+      `This almost always means main.js and the test/ directory came from DIFFERENT delivered versions ` +
+      `(e.g. main.js was updated but test/ wasn't, or vice versa).\n` +
+      `Fix: re-download the full delivered package and replace EVERY file in test/ (including this one) ` +
+      `and main.js together — never mix files from different versions.\n` +
+      `(If you're intentionally developing a new version and haven't bumped this constant yet, update ` +
+      `EXPECTED_LITEIDE_VERSION at the top of this file to match.)\n`
+    );
   }
 
   return { ...mock, exports: moduleExports };
